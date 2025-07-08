@@ -4,7 +4,78 @@ import HexDump from '../components/HexDump.astro';
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout>
-	<PasswordGenerator />
-	<HexDump />
+<Layout currentTool="password-generator">
+	<div class="tool-container">
+		<div class="tool-wrapper" id="password-generator" data-tool="password-generator">
+			<PasswordGenerator />
+		</div>
+		<div class="tool-wrapper hidden" id="hexdump" data-tool="hexdump">
+			<HexDump />
+		</div>
+	</div>
 </Layout>
+
+<script>
+	// Tool switching functionality
+	let currentTool = 'password-generator';
+
+	function showTool(toolId: string) {
+		// Hide all tools
+		const allTools = document.querySelectorAll('.tool-wrapper');
+		allTools.forEach(tool => {
+			tool.classList.add('hidden');
+		});
+
+		// Show selected tool
+		const selectedTool = document.getElementById(toolId);
+		if (selectedTool) {
+			selectedTool.classList.remove('hidden');
+			currentTool = toolId;
+		}
+	}
+
+	// Listen for tool switch events from SideMenu
+	window.addEventListener('toolSwitch', (event: CustomEvent) => {
+		const { toolId } = event.detail;
+		showTool(toolId);
+	});
+
+	// Initialize with default tool
+	showTool(currentTool);
+</script>
+
+<style>
+	.tool-container {
+		min-height: 100vh;
+		position: relative;
+	}
+
+	.tool-wrapper {
+		width: 100%;
+		transition: all 0.3s ease;
+		animation: fadeIn 0.5s ease-out;
+	}
+
+	.tool-wrapper.hidden {
+		display: none;
+	}
+
+	/* Ensure smooth transitions */
+	.tool-wrapper:not(.hidden) {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
+	/* Loading state */
+	.tool-wrapper.loading {
+		opacity: 0.5;
+		pointer-events: none;
+	}
+
+	/* Mobile adjustments */
+	@media (max-width: 768px) {
+		.tool-container {
+			padding: 0;
+		}
+	}
+</style>

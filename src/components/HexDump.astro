@@ -1,24 +1,66 @@
 ---
 ---
 
-<div id="hexdump-tool">
-	<h2>Hex Dump Tool</h2>
+<div class="tool-container">
+	<div class="tool-header">
+		<h1>📊 Hex Dump Tool</h1>
+		<p>Binary file analysis with hexdump display and visual representation</p>
+	</div>
 	
-	<div class="controls">
-		<input type="file" id="file-input" accept="*/*" />
+	<div class="glass-card tool-controls">
+		<div class="file-input">
+			<input type="file" id="file-input" accept="*/*" />
+			<div class="file-input-label">
+				<span>📁 Choose Binary File</span>
+			</div>
+		</div>
 		<div class="file-info">
-			<span id="file-name">No file selected</span>
-			<span id="file-size"></span>
+			<div class="file-detail">
+				<span class="file-label">File:</span>
+				<span id="file-name">No file selected</span>
+			</div>
+			<div class="file-detail">
+				<span class="file-label">Size:</span>
+				<span id="file-size">-</span>
+			</div>
 		</div>
 	</div>
 	
-	<div class="viewer">
-		<div class="hex-output-container">
-			<div id="hex-output"></div>
+	<div class="viewer-grid">
+		<div class="glass-card hex-output-container">
+			<div class="result-header">
+				<h3>Hex Dump Output</h3>
+				<div class="format-info">16 bytes per line</div>
+			</div>
+			<div id="hex-output" class="hex-output"></div>
 		</div>
 		
-		<div class="canvas-container">
-			<canvas id="hex-canvas" width="256" height="400"></canvas>
+		<div class="glass-card canvas-container">
+			<div class="result-header">
+				<h3>Visual Representation</h3>
+				<div class="format-info">256 bytes per line</div>
+			</div>
+			<div class="canvas-wrapper">
+				<canvas id="hex-canvas" width="256" height="400"></canvas>
+				<div class="color-legend">
+					<div class="legend-item">
+						<div class="color-sample" style="background: #FFFFFF; border: 1px solid var(--border-primary);"></div>
+						<span>0x00</span>
+					</div>
+					<div class="legend-item">
+						<div class="color-sample" style="background: #00FFFF;"></div>
+						<span>0x01-0x1F</span>
+					</div>
+					<div class="legend-item">
+						<div class="color-sample" style="background: #FF0000;"></div>
+						<span>0x20-0x7E</span>
+					</div>
+					<div class="legend-item">
+						<div class="color-sample" style="background: #000000;"></div>
+						<span>0x80-0xFF</span>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </div>
@@ -159,98 +201,127 @@
 </script>
 
 <style>
-	#hexdump-tool {
-		max-width: 1200px;
-		margin: 0 auto;
-		padding: 20px;
-		font-family: Inter, Roboto, 'Helvetica Neue', 'Arial Nova', 'Nimbus Sans', Arial, sans-serif;
-	}
-
-	h2 {
-		color: #111827;
-		margin-bottom: 20px;
-		font-size: 1.8rem;
-		font-weight: 600;
-	}
-
-	.controls {
-		background: rgba(255, 255, 255, 0.9);
-		border-radius: 12px;
-		padding: 20px;
-		margin-bottom: 20px;
-		border: 1px solid rgba(229, 231, 235, 0.8);
-		backdrop-filter: blur(10px);
-	}
-
-	#file-input {
-		margin-bottom: 12px;
-		padding: 8px;
-		border: 1px solid #d1d5db;
-		border-radius: 6px;
-		font-size: 14px;
-		background: white;
-	}
-
 	.file-info {
 		display: flex;
-		gap: 16px;
-		font-size: 14px;
-		color: #4b5563;
+		gap: 2rem;
+		margin-top: 1rem;
+	}
+
+	.file-detail {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+
+	.file-label {
+		font-weight: 500;
+		color: var(--text-secondary);
+		min-width: 3rem;
 	}
 
 	#file-name {
 		font-weight: 500;
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 0.875rem;
 	}
 
-	.viewer {
+	#file-size {
+		color: var(--text-accent);
+		font-family: var(--font-mono);
+		font-size: 0.875rem;
+	}
+
+	.viewer-grid {
 		display: grid;
-		grid-template-columns: 1fr 256px;
-		gap: 20px;
-		height: 600px;
+		grid-template-columns: 1fr 300px;
+		gap: 1.5rem;
+		margin-top: 1.5rem;
 	}
 
 	.hex-output-container {
-		background: rgba(255, 255, 255, 0.9);
-		border-radius: 12px;
-		padding: 16px;
-		border: 1px solid rgba(229, 231, 235, 0.8);
-		backdrop-filter: blur(10px);
-		overflow-y: auto;
-		height: 100%;
+		min-height: 600px;
+		display: flex;
+		flex-direction: column;
 	}
 
-	#hex-output {
-		font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
-		font-size: 13px;
+	.hex-output {
+		flex: 1;
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
 		line-height: 1.4;
-		color: #111827;
+		color: var(--text-primary);
 		white-space: pre;
-		min-height: 100%;
+		overflow-y: auto;
+		padding: 1rem;
+		background: var(--bg-tertiary);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-primary);
+		margin-top: 1rem;
 	}
 
 	.canvas-container {
-		background: rgba(255, 255, 255, 0.9);
-		border-radius: 12px;
-		padding: 16px;
-		border: 1px solid rgba(229, 231, 235, 0.8);
-		backdrop-filter: blur(10px);
+		display: flex;
+		flex-direction: column;
+		min-height: 600px;
+	}
+
+	.canvas-wrapper {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
+		gap: 1rem;
+		margin-top: 1rem;
 	}
 
 	#hex-canvas {
-		border: 1px solid #d1d5db;
-		border-radius: 4px;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		image-rendering: pixelated;
-		width: 256px;
-		height: 400px;
+		background: var(--bg-tertiary);
+		box-shadow: var(--shadow-md);
+		transition: box-shadow 0.2s ease;
 	}
 
+	#hex-canvas:hover {
+		box-shadow: var(--shadow-lg);
+	}
+
+	.color-legend {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 0.5rem;
+		width: 100%;
+		max-width: 256px;
+	}
+
+	.legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+	}
+
+	.color-sample {
+		width: 12px;
+		height: 12px;
+		border-radius: 2px;
+		flex-shrink: 0;
+	}
+
+	.format-info {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+	}
+
+	/* Mobile responsive */
 	@media (max-width: 768px) {
-		.viewer {
+		.viewer-grid {
 			grid-template-columns: 1fr;
-			height: auto;
+			gap: 1rem;
 		}
 
 		.canvas-container {
@@ -263,25 +334,120 @@
 		}
 
 		.hex-output-container {
-			height: 400px;
+			min-height: 400px;
+		}
+
+		.file-info {
+			flex-direction: column;
+			gap: 0.5rem;
+		}
+
+		.color-legend {
+			grid-template-columns: 1fr;
 		}
 	}
 
-	.hex-output-container::-webkit-scrollbar {
-		width: 8px;
+	/* Enhanced scrollbar for hex output */
+	.hex-output::-webkit-scrollbar {
+		width: 6px;
 	}
 
-	.hex-output-container::-webkit-scrollbar-track {
-		background: #f1f5f9;
-		border-radius: 4px;
+	.hex-output::-webkit-scrollbar-track {
+		background: var(--bg-secondary);
+		border-radius: var(--radius-sm);
 	}
 
-	.hex-output-container::-webkit-scrollbar-thumb {
-		background: #cbd5e1;
-		border-radius: 4px;
+	.hex-output::-webkit-scrollbar-thumb {
+		background: var(--text-muted);
+		border-radius: var(--radius-sm);
+		transition: background 0.2s ease;
 	}
 
-	.hex-output-container::-webkit-scrollbar-thumb:hover {
-		background: #94a3b8;
+	.hex-output::-webkit-scrollbar-thumb:hover {
+		background: var(--text-secondary);
+	}
+
+	/* Loading state */
+	.hex-output.loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.hex-output.loading::before {
+		content: 'Loading file...';
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.hex-output.loading::after {
+		content: '';
+		width: 16px;
+		height: 16px;
+		border: 2px solid var(--border-primary);
+		border-top: 2px solid var(--accent-primary);
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	/* Empty state */
+	.hex-output:empty::before {
+		content: 'Select a file to view its hex dump...';
+		color: var(--text-muted);
+		font-style: italic;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+	}
+
+	/* Animation for canvas */
+	@keyframes canvasLoad {
+		0% {
+			opacity: 0;
+			transform: scale(0.9);
+		}
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	#hex-canvas.loaded {
+		animation: canvasLoad 0.3s ease-out;
+	}
+
+	/* Hover effects */
+	.glass-card:hover {
+		transform: translateY(-2px);
+	}
+
+	.result-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0;
+		padding-bottom: 0;
+	}
+
+	.result-header h3 {
+		margin: 0;
+		font-size: 1.1rem;
+	}
+
+	/* File input enhancements */
+	.file-input:hover .file-input-label {
+		border-color: var(--accent-primary);
+		background: var(--bg-card);
+		color: var(--text-primary);
+	}
+
+	.file-input.has-file .file-input-label {
+		border-color: var(--accent-success);
+		background: var(--bg-card);
+		color: var(--accent-success);
 	}
 </style>
