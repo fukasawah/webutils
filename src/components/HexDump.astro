@@ -1,0 +1,287 @@
+---
+---
+
+<div id="hexdump-tool">
+	<h2>Hex Dump Tool</h2>
+	
+	<div class="controls">
+		<input type="file" id="file-input" accept="*/*" />
+		<div class="file-info">
+			<span id="file-name">No file selected</span>
+			<span id="file-size"></span>
+		</div>
+	</div>
+	
+	<div class="viewer">
+		<div class="hex-output-container">
+			<div id="hex-output"></div>
+		</div>
+		
+		<div class="canvas-container">
+			<canvas id="hex-canvas" width="256" height="400"></canvas>
+		</div>
+	</div>
+</div>
+
+<script>
+	const fileInput = document.getElementById('file-input') as HTMLInputElement;
+	const fileName = document.getElementById('file-name') as HTMLSpanElement;
+	const fileSize = document.getElementById('file-size') as HTMLSpanElement;
+	const hexOutput = document.getElementById('hex-output') as HTMLDivElement;
+	const canvas = document.getElementById('hex-canvas') as HTMLCanvasElement;
+	const ctx = canvas.getContext('2d')!;
+
+	let currentFile: File | null = null;
+	let fileBuffer: ArrayBuffer | null = null;
+	let scrollTop = 0;
+	const BYTES_PER_LINE = 16;
+	const CANVAS_BYTES_PER_LINE = 256;
+	const LINES_TO_DISPLAY = 50;
+
+	function formatFileSize(bytes: number): string {
+		if (bytes === 0) return '0 Bytes';
+		const k = 1024;
+		const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+	}
+
+	function byteToHex(byte: number): string {
+		return byte.toString(16).padStart(2, '0').toUpperCase();
+	}
+
+	function byteToChar(byte: number): string {
+		return (byte >= 0x20 && byte <= 0x7E) ? String.fromCharCode(byte) : '.';
+	}
+
+	function getByteColor(byte: number): string {
+		if (byte === 0x00) return '#FFFFFF';
+		if (byte >= 0x01 && byte <= 0x1F) return '#00FFFF';
+		if (byte >= 0x20 && byte <= 0x7E) return '#FF0000';
+		return '#000000';
+	}
+
+	function generateHexDump(buffer: ArrayBuffer, offset: number, lines: number): string {
+		const bytes = new Uint8Array(buffer);
+		const maxOffset = Math.min(offset + lines * BYTES_PER_LINE, bytes.length);
+		let output = '';
+
+		for (let i = offset; i < maxOffset; i += BYTES_PER_LINE) {
+			const lineOffset = i.toString(16).padStart(8, '0').toUpperCase();
+			let hexPart = '';
+			let textPart = '';
+
+			for (let j = 0; j < BYTES_PER_LINE; j++) {
+				const byteIndex = i + j;
+				if (byteIndex < bytes.length) {
+					const byte = bytes[byteIndex];
+					hexPart += byteToHex(byte) + ' ';
+					textPart += byteToChar(byte);
+				} else {
+					hexPart += '   ';
+					textPart += ' ';
+				}
+			}
+
+			output += `${lineOffset}: ${hexPart} |${textPart}|\n`;
+		}
+
+		return output;
+	}
+
+	function drawCanvas(buffer: ArrayBuffer, offset: number): void {
+		const bytes = new Uint8Array(buffer);
+		const canvasHeight = canvas.height;
+		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
+		const totalLines = Math.ceil(canvasHeight);
+		
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+		for (let y = 0; y < canvasHeight; y++) {
+			for (let x = 0; x < bytesPerCanvasLine; x++) {
+				const byteIndex = offset + y * bytesPerCanvasLine + x;
+				
+				if (byteIndex < bytes.length) {
+					const byte = bytes[byteIndex];
+					ctx.fillStyle = getByteColor(byte);
+					ctx.fillRect(x, y, 1, 1);
+				}
+			}
+		}
+	}
+
+	function updateDisplay(): void {
+		if (!fileBuffer) return;
+
+		const hexDump = generateHexDump(fileBuffer, scrollTop, LINES_TO_DISPLAY);
+		hexOutput.textContent = hexDump;
+
+		drawCanvas(fileBuffer, scrollTop);
+	}
+
+	function handleScroll(event: Event): void {
+		const target = event.target as HTMLElement;
+		const scrollPercent = target.scrollTop / (target.scrollHeight - target.clientHeight);
+		
+		if (fileBuffer) {
+			const totalBytes = fileBuffer.byteLength;
+			const maxOffset = Math.max(0, totalBytes - LINES_TO_DISPLAY * BYTES_PER_LINE);
+			scrollTop = Math.floor(scrollPercent * maxOffset);
+			scrollTop = Math.floor(scrollTop / BYTES_PER_LINE) * BYTES_PER_LINE;
+			updateDisplay();
+		}
+	}
+
+	async function handleFileChange(event: Event): Promise<void> {
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+		
+		if (!file) return;
+
+		currentFile = file;
+		fileName.textContent = file.name;
+		fileSize.textContent = formatFileSize(file.size);
+
+		try {
+			fileBuffer = await file.arrayBuffer();
+			scrollTop = 0;
+			updateDisplay();
+		} catch (error) {
+			console.error('Error reading file:', error);
+			alert('Error reading file');
+		}
+	}
+
+	fileInput.addEventListener('change', handleFileChange);
+	
+	const hexOutputContainer = document.querySelector('.hex-output-container') as HTMLElement;
+	hexOutputContainer.addEventListener('scroll', handleScroll);
+</script>
+
+<style>
+	#hexdump-tool {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 20px;
+		font-family: Inter, Roboto, 'Helvetica Neue', 'Arial Nova', 'Nimbus Sans', Arial, sans-serif;
+	}
+
+	h2 {
+		color: #111827;
+		margin-bottom: 20px;
+		font-size: 1.8rem;
+		font-weight: 600;
+	}
+
+	.controls {
+		background: rgba(255, 255, 255, 0.9);
+		border-radius: 12px;
+		padding: 20px;
+		margin-bottom: 20px;
+		border: 1px solid rgba(229, 231, 235, 0.8);
+		backdrop-filter: blur(10px);
+	}
+
+	#file-input {
+		margin-bottom: 12px;
+		padding: 8px;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font-size: 14px;
+		background: white;
+	}
+
+	.file-info {
+		display: flex;
+		gap: 16px;
+		font-size: 14px;
+		color: #4b5563;
+	}
+
+	#file-name {
+		font-weight: 500;
+	}
+
+	.viewer {
+		display: grid;
+		grid-template-columns: 1fr 256px;
+		gap: 20px;
+		height: 600px;
+	}
+
+	.hex-output-container {
+		background: rgba(255, 255, 255, 0.9);
+		border-radius: 12px;
+		padding: 16px;
+		border: 1px solid rgba(229, 231, 235, 0.8);
+		backdrop-filter: blur(10px);
+		overflow-y: auto;
+		height: 100%;
+	}
+
+	#hex-output {
+		font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+		font-size: 13px;
+		line-height: 1.4;
+		color: #111827;
+		white-space: pre;
+		min-height: 100%;
+	}
+
+	.canvas-container {
+		background: rgba(255, 255, 255, 0.9);
+		border-radius: 12px;
+		padding: 16px;
+		border: 1px solid rgba(229, 231, 235, 0.8);
+		backdrop-filter: blur(10px);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	#hex-canvas {
+		border: 1px solid #d1d5db;
+		border-radius: 4px;
+		image-rendering: pixelated;
+		width: 256px;
+		height: 400px;
+	}
+
+	@media (max-width: 768px) {
+		.viewer {
+			grid-template-columns: 1fr;
+			height: auto;
+		}
+
+		.canvas-container {
+			order: -1;
+		}
+
+		#hex-canvas {
+			width: 100%;
+			max-width: 256px;
+		}
+
+		.hex-output-container {
+			height: 400px;
+		}
+	}
+
+	.hex-output-container::-webkit-scrollbar {
+		width: 8px;
+	}
+
+	.hex-output-container::-webkit-scrollbar-track {
+		background: #f1f5f9;
+		border-radius: 4px;
+	}
+
+	.hex-output-container::-webkit-scrollbar-thumb {
+		background: #cbd5e1;
+		border-radius: 4px;
+	}
+
+	.hex-output-container::-webkit-scrollbar-thumb:hover {
+		background: #94a3b8;
+	}
+</style>
