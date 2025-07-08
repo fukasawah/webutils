@@ -1,81 +1,186 @@
 ---
-import PasswordGenerator from '../components/PasswordGenerator.astro';
-import HexDump from '../components/HexDump.astro';
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout currentTool="password-generator">
-	<div class="tool-container">
-		<div class="tool-wrapper" id="password-generator" data-tool="password-generator">
-			<PasswordGenerator />
+<Layout title="Web Toolbox - Security & Development Tools">
+	<div class="home-container">
+		<div class="home-header">
+			<h1>🛠️ Web Toolbox</h1>
+			<p class="home-subtitle">Powerful security and development tools for professionals</p>
 		</div>
-		<div class="tool-wrapper hidden" id="hexdump" data-tool="hexdump">
-			<HexDump />
+
+		<div class="tools-grid">
+			<a href="/password-generator" class="tool-card glass-card">
+				<div class="tool-icon">🔐</div>
+				<h3>Password Generator</h3>
+				<p>Generate secure passwords with customizable options</p>
+				<div class="tool-features">
+					<span class="feature">Multiple passwords</span>
+					<span class="feature">Cryptographically secure</span>
+					<span class="feature">Custom character sets</span>
+				</div>
+			</a>
+
+			<a href="/hexdump" class="tool-card glass-card">
+				<div class="tool-icon">📊</div>
+				<h3>Hex Dump Tool</h3>
+				<p>Binary file analysis with hexdump display and visualization</p>
+				<div class="tool-features">
+					<span class="feature">Visual representation</span>
+					<span class="feature">Color-coded bytes</span>
+					<span class="feature">Virtual scrolling</span>
+				</div>
+			</a>
+		</div>
+
+		<div class="home-footer">
+			<p>Built with Astro • Secure by design • Desktop optimized</p>
 		</div>
 	</div>
 </Layout>
 
-<script>
-	// Tool switching functionality
-	let currentTool = 'password-generator';
-
-	function showTool(toolId: string) {
-		// Hide all tools
-		const allTools = document.querySelectorAll('.tool-wrapper');
-		allTools.forEach(tool => {
-			tool.classList.add('hidden');
-		});
-
-		// Show selected tool
-		const selectedTool = document.getElementById(toolId);
-		if (selectedTool) {
-			selectedTool.classList.remove('hidden');
-			currentTool = toolId;
-		}
-	}
-
-	// Listen for tool switch events from SideMenu
-	window.addEventListener('toolSwitch', (event: CustomEvent) => {
-		const { toolId } = event.detail;
-		showTool(toolId);
-	});
-
-	// Initialize with default tool
-	showTool(currentTool);
-</script>
-
 <style>
-	.tool-container {
+	.home-container {
+		max-width: 1000px;
+		margin: 0 auto;
+		padding: 4rem 2rem;
 		min-height: 100vh;
-		position: relative;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
+		text-align: center;
 	}
 
-	.tool-wrapper {
+	.home-header {
+		margin-bottom: 4rem;
+	}
+
+	.home-header h1 {
+		font-size: 3.5rem;
+		margin-bottom: 1rem;
+		background: linear-gradient(135deg, var(--text-primary), var(--text-accent));
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+	}
+
+	.home-subtitle {
+		font-size: 1.25rem;
+		color: var(--text-secondary);
+		margin: 0;
+	}
+
+	.tools-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+		gap: 2rem;
 		width: 100%;
+		max-width: 800px;
+		margin-bottom: 4rem;
+	}
+
+	.tool-card {
+		padding: 2rem;
+		text-decoration: none;
+		color: inherit;
 		transition: all 0.3s ease;
-		animation: fadeIn 0.5s ease-out;
+		border-radius: var(--radius-xl);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		min-height: 280px;
+		position: relative;
+		overflow: hidden;
 	}
 
-	.tool-wrapper.hidden {
-		display: none;
+	.tool-card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: -100%;
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.1), transparent);
+		transition: left 0.5s ease;
 	}
 
-	/* Ensure smooth transitions */
-	.tool-wrapper:not(.hidden) {
-		opacity: 1;
-		transform: translateY(0);
+	.tool-card:hover::before {
+		left: 100%;
 	}
 
-	/* Loading state */
-	.tool-wrapper.loading {
-		opacity: 0.5;
-		pointer-events: none;
+	.tool-card:hover {
+		transform: translateY(-8px);
+		box-shadow: var(--shadow-xl), var(--shadow-glow);
+		border-color: var(--accent-primary);
 	}
 
-	/* Mobile adjustments */
-	@media (max-width: 768px) {
-		.tool-container {
-			padding: 0;
-		}
+	.tool-icon {
+		font-size: 4rem;
+		margin-bottom: 1.5rem;
+		filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
+	}
+
+	.tool-card h3 {
+		font-size: 1.5rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
+		color: var(--text-primary);
+	}
+
+	.tool-card p {
+		color: var(--text-secondary);
+		margin-bottom: 1.5rem;
+		line-height: 1.6;
+		flex: 1;
+	}
+
+	.tool-features {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		justify-content: center;
+	}
+
+	.feature {
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		padding: 0.25rem 0.75rem;
+		font-size: 0.75rem;
+		color: var(--text-accent);
+		font-weight: 500;
+	}
+
+	.home-footer {
+		margin-top: auto;
+	}
+
+	.home-footer p {
+		color: var(--text-muted);
+		font-size: 0.875rem;
+		margin: 0;
+	}
+
+	/* Animation */
+	.tool-card {
+		animation: fadeIn 0.6s ease-out;
+	}
+
+	.tool-card:nth-child(1) {
+		animation-delay: 0.1s;
+	}
+
+	.tool-card:nth-child(2) {
+		animation-delay: 0.2s;
+	}
+
+	.home-header {
+		animation: fadeIn 0.8s ease-out;
+	}
+
+	.home-footer {
+		animation: fadeIn 1s ease-out;
 	}
 </style>

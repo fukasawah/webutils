@@ -48,14 +48,6 @@ const { title = 'Web Toolbox', currentTool } = Astro.props;
 		overflow-x: hidden;
 	}
 
-	/* Mobile responsive */
-	@media (max-width: 768px) {
-		.main-content {
-			margin-left: 0;
-			width: 100%;
-		}
-	}
-
 	/* Background pattern */
 	.main-content::before {
 		content: '';
@@ -72,12 +64,6 @@ const { title = 'Web Toolbox', currentTool } = Astro.props;
 		z-index: -1;
 	}
 
-	@media (max-width: 768px) {
-		.main-content::before {
-			left: 0;
-		}
-	}
-
 	/* Content area styling */
 	.main-content > * {
 		position: relative;
@@ -89,3 +75,4 @@ const { title = 'Web Toolbox', currentTool } = Astro.props;
 		scroll-behavior: smooth;
 	}
 </style>
+

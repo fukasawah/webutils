@@ -73,7 +73,6 @@
 	const canvas = document.getElementById('hex-canvas') as HTMLCanvasElement;
 	const ctx = canvas.getContext('2d')!;
 
-	let currentFile: File | null = null;
 	let fileBuffer: ArrayBuffer | null = null;
 	let scrollTop = 0;
 	const BYTES_PER_LINE = 16;
@@ -135,7 +134,6 @@
 		const bytes = new Uint8Array(buffer);
 		const canvasHeight = canvas.height;
 		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
-		const totalLines = Math.ceil(canvasHeight);
 		
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -180,7 +178,6 @@
 		
 		if (!file) return;
 
-		currentFile = file;
 		fileName.textContent = file.name;
 		fileSize.textContent = formatFileSize(file.size);
 
@@ -317,35 +314,6 @@
 		font-family: var(--font-mono);
 	}
 
-	/* Mobile responsive */
-	@media (max-width: 768px) {
-		.viewer-grid {
-			grid-template-columns: 1fr;
-			gap: 1rem;
-		}
-
-		.canvas-container {
-			order: -1;
-		}
-
-		#hex-canvas {
-			width: 100%;
-			max-width: 256px;
-		}
-
-		.hex-output-container {
-			min-height: 400px;
-		}
-
-		.file-info {
-			flex-direction: column;
-			gap: 0.5rem;
-		}
-
-		.color-legend {
-			grid-template-columns: 1fr;
-		}
-	}
 
 	/* Enhanced scrollbar for hex output */
 	.hex-output::-webkit-scrollbar {
