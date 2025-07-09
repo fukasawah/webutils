@@ -1,12 +1,15 @@
 ---
+
 ---
 
 <div class="tool-container">
 	<div class="tool-header">
 		<h1>📊 Hex Dump Tool</h1>
-		<p>Binary file analysis with hexdump display and visual representation</p>
+		<p>
+			Binary file analysis with hexdump display and visual representation
+		</p>
 	</div>
-	
+
 	<div class="glass-card tool-controls">
 		<div class="file-input">
 			<input type="file" id="file-input" accept="*/*" />
@@ -25,7 +28,7 @@
 			</div>
 		</div>
 	</div>
-	
+
 	<div class="viewer-grid">
 		<div class="glass-card hex-output-container">
 			<div class="result-header">
@@ -45,7 +48,7 @@
 				<span id="offset-info">Offset: 0x00000000</span>
 			</div>
 		</div>
-		
+
 		<div class="glass-card canvas-container">
 			<div class="result-header">
 				<h3>Visual Representation</h3>
@@ -55,44 +58,75 @@
 				<canvas id="hex-canvas" width="256" height="400"></canvas>
 				<div class="color-legend">
 					<div class="legend-item">
-						<div class="color-sample" style="background: #FFFFFF; border: 1px solid var(--border-primary);"></div>
+						<div
+							class="color-sample"
+							style="background: #FFFFFF; border: 1px solid var(--border-primary);"
+						>
+						</div>
 						<span>0x00</span>
 					</div>
 					<div class="legend-item">
-						<div class="color-sample" style="background: #00FFFF;"></div>
+						<div class="color-sample" style="background: #00FFFF;">
+						</div>
 						<span>0x01-0x1F</span>
 					</div>
 					<div class="legend-item">
-						<div class="color-sample" style="background: #FF0000;"></div>
+						<div class="color-sample" style="background: #FF0000;">
+						</div>
 						<span>0x20-0x7E</span>
 					</div>
 					<div class="legend-item">
-						<div class="color-sample" style="background: #000000;"></div>
+						<div class="color-sample" style="background: #000000;">
+						</div>
 						<span>0x80-0xFF</span>
 					</div>
 				</div>
 			</div>
 		</div>
 	</div>
-	
+
 	<div class="status-bar">
 		<span id="status-message">Ready</span>
+	</div>
+	
+	<!-- ドラッグ&ドロップオーバーレイ -->
+	<div id="drag-overlay" class="drag-overlay hidden">
+		<div class="drag-message">
+			<div class="drag-icon">📁</div>
+			<div class="drag-text">Drop file here to analyze</div>
+		</div>
 	</div>
 </div>
 
 <script>
-	const fileInput = document.getElementById('file-input') as HTMLInputElement;
-	const fileName = document.getElementById('file-name') as HTMLSpanElement;
-	const fileSize = document.getElementById('file-size') as HTMLSpanElement;
-	const hexOutput = document.getElementById('hex-output') as HTMLDivElement;
-	const canvas = document.getElementById('hex-canvas') as HTMLCanvasElement;
-	const ctx = canvas.getContext('2d')!;
-	const customScrollbar = document.getElementById('custom-scrollbar') as HTMLDivElement;
-	const scrollbarTrack = document.getElementById('scrollbar-track') as HTMLDivElement;
-	const scrollbarThumb = document.getElementById('scrollbar-thumb') as HTMLDivElement;
-	const scrollPosition = document.getElementById('scroll-position') as HTMLSpanElement;
-	const offsetInfo = document.getElementById('offset-info') as HTMLSpanElement;
-	const statusMessage = document.getElementById('status-message') as HTMLSpanElement;
+	const fileInput = document.getElementById("file-input") as HTMLInputElement;
+	const fileName = document.getElementById("file-name") as HTMLSpanElement;
+	const fileSize = document.getElementById("file-size") as HTMLSpanElement;
+	const hexOutput = document.getElementById("hex-output") as HTMLDivElement;
+	const canvas = document.getElementById("hex-canvas") as HTMLCanvasElement;
+	const ctx = canvas.getContext("2d", { willReadFrequently: false })!;
+
+	// Canvas描画の最適化設定
+	ctx.imageSmoothingEnabled = false;
+	const customScrollbar = document.getElementById(
+		"custom-scrollbar",
+	) as HTMLDivElement;
+	const scrollbarTrack = document.getElementById(
+		"scrollbar-track",
+	) as HTMLDivElement;
+	const scrollbarThumb = document.getElementById(
+		"scrollbar-thumb",
+	) as HTMLDivElement;
+	const scrollPosition = document.getElementById(
+		"scroll-position",
+	) as HTMLSpanElement;
+	const offsetInfo = document.getElementById(
+		"offset-info",
+	) as HTMLSpanElement;
+	const statusMessage = document.getElementById(
+		"status-message",
+	) as HTMLSpanElement;
+	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
 
 	let currentFile: File | null = null;
 	let totalFileSize = 0;
@@ -102,94 +136,158 @@
 	let dragStartOffset = 0;
 	let isLoading = false;
 	let lastUpdateOffset = -1;
+	let dragCounter = 0; // ドラッグイベントの重複防止
+	
 	const BYTES_PER_LINE = 16;
 	const CANVAS_BYTES_PER_LINE = 256;
-	const LINES_TO_DISPLAY = 50;
-	const CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE; // 表示用チャンクサイズ
+	let LINES_TO_DISPLAY = 50; // 動的に変更される
+	let CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE; // 表示用チャンクサイズ
 	const CANVAS_CHUNK_SIZE = 400 * CANVAS_BYTES_PER_LINE; // Canvas用チャンクサイズ
 	const MIN_THUMB_HEIGHT = 20; // 最小サムの高さ（px）
+	const MIN_LINES = 10; // 最小表示行数
+	const MAX_LINES = 100; // 最大表示行数
 
 	function throttle(func: Function, delay: number): Function {
-		let timeoutId: number | null = null;
+		let timeoutId: number | null | NodeJS.Timeout = null;
 		let lastExecTime = 0;
 		return function (...args: any[]) {
 			const currentTime = Date.now();
 			if (currentTime - lastExecTime > delay) {
-				func.apply(this, args);
+				func(...args);
 				lastExecTime = currentTime;
 			} else if (!timeoutId) {
-				timeoutId = setTimeout(() => {
-					func.apply(this, args);
-					lastExecTime = Date.now();
-					timeoutId = null;
-				}, delay - (currentTime - lastExecTime));
+				timeoutId = setTimeout(
+					() => {
+						func(...args);
+						lastExecTime = Date.now();
+						timeoutId = null;
+					},
+					delay - (currentTime - lastExecTime),
+				);
 			}
 		};
 	}
 
+	function calculateVisibleLines(): number {
+		try {
+			// hex-output要素の実際の高さを取得
+			const containerHeight = hexOutput.clientHeight;
+			if (containerHeight === 0) {
+				return 35; // デフォルト値
+			}
+
+			// パディングを除いた利用可能な高さ
+			const padding = 32; // 1rem × 2 (top/bottom padding)
+			const availableHeight = containerHeight - padding;
+
+			// 1行の高さを計算（font-size: 0.8rem, line-height: 1.4）
+			const fontSize = 0.8 * 16; // 0.8rem → px
+			const lineHeight = fontSize * 1.4; // line-height: 1.4
+
+			// 表示可能な行数を計算
+			const visibleLines = Math.floor(availableHeight / lineHeight);
+
+			// 最小値と最大値の範囲内に制限
+			return Math.max(MIN_LINES, Math.min(MAX_LINES, visibleLines));
+		} catch (error) {
+			console.warn("Failed to calculate visible lines:", error);
+			return 35; // エラー時のデフォルト値
+		}
+	}
+
+	function updateChunkSize(): void {
+		LINES_TO_DISPLAY = calculateVisibleLines();
+		CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE;
+		console.log(
+			`Updated display lines: ${LINES_TO_DISPLAY}, chunk size: ${CHUNK_SIZE}`,
+		);
+	}
+
+
 	function formatFileSize(bytes: number): string {
-		if (bytes === 0) return '0 Bytes';
+		if (bytes === 0) return "0 Bytes";
 		const k = 1024;
-		const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+		const sizes = ["Bytes", "KB", "MB", "GB"];
 		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 	}
 
 	function byteToHex(byte: number): string {
-		return byte.toString(16).padStart(2, '0').toUpperCase();
+		return byte.toString(16).padStart(2, "0").toUpperCase();
 	}
 
 	function byteToChar(byte: number): string {
-		return (byte >= 0x20 && byte <= 0x7E) ? String.fromCharCode(byte) : '.';
+		return byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ".";
 	}
 
-	function getByteColor(byte: number): string {
-		if (byte === 0x00) return '#FFFFFF';
-		if (byte >= 0x01 && byte <= 0x1F) return '#00FFFF';
-		if (byte >= 0x20 && byte <= 0x7E) return '#FF0000';
-		return '#000000';
+
+	function getByteColorRGB(byte: number): {
+		r: number;
+		g: number;
+		b: number;
+	} {
+		if (byte === 0x00) return { r: 255, g: 255, b: 255 }; // 白
+		if (byte >= 0x01 && byte <= 0x1f) return { r: 0, g: 255, b: 255 }; // 水色
+		if (byte >= 0x20 && byte <= 0x7e) return { r: 255, g: 0, b: 0 }; // 赤
+		return { r: 0, g: 0, b: 0 }; // 黒
 	}
 
-	function percentageToOffset(percentage: number): number {
-		if (!totalFileSize) return 0;
-		const maxOffset = Math.max(0, totalFileSize - CHUNK_SIZE);
-		const offset = Math.floor((percentage / 100) * maxOffset);
-		return Math.floor(offset / BYTES_PER_LINE) * BYTES_PER_LINE; // 行境界に揃える
-	}
 
-	async function loadChunk(offset: number, size: number): Promise<ArrayBuffer | null> {
+	async function loadChunk(
+		offset: number,
+		size: number,
+	): Promise<ArrayBuffer | null> {
 		if (!currentFile) return null;
-		
+
 		const start = Math.max(0, offset);
 		const end = Math.min(currentFile.size, offset + size);
-		
+
 		if (start >= end) return null;
-		
+
 		try {
 			const slice = currentFile.slice(start, end);
 			return await slice.arrayBuffer();
 		} catch (error) {
-			console.error('Error loading chunk:', error);
+			console.error("Error loading chunk:", error);
 			return null;
 		}
 	}
 
 	function updateScrollInfo(percentage: number, offset: number): void {
 		scrollPosition.textContent = `${percentage.toFixed(1)}%`;
-		offsetInfo.textContent = `Offset: 0x${offset.toString(16).padStart(8, '0').toUpperCase()}`;
+		offsetInfo.textContent = `Offset: 0x${offset.toString(16).padStart(8, "0").toUpperCase()}`;
 	}
 
-	function calculateScrollbarDimensions(): { thumbHeight: number; thumbPosition: number; visible: boolean } {
+	function getMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
+			return 0;
+		}
+		
+		// ファイルの最後のバイトが含まれる行の開始オフセット
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+	function calculateScrollbarDimensions(): {
+		thumbHeight: number;
+		thumbPosition: number;
+		visible: boolean;
+	} {
 		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
 			return { thumbHeight: 0, thumbPosition: 0, visible: false };
 		}
 
 		const trackHeight = scrollbarTrack.clientHeight;
 		const visibleRatio = CHUNK_SIZE / totalFileSize;
-		const thumbHeight = Math.max(MIN_THUMB_HEIGHT, trackHeight * visibleRatio);
-		
-		const maxOffset = totalFileSize - CHUNK_SIZE;
-		const scrollProgress = currentOffset / maxOffset;
+		const thumbHeight = Math.max(
+			MIN_THUMB_HEIGHT,
+			trackHeight * visibleRatio,
+		);
+
+		const maxOffset = getMaxOffset();
+		const scrollProgress = maxOffset > 0 ? currentOffset / maxOffset : 0;
 		const maxThumbPosition = trackHeight - thumbHeight;
 		const thumbPosition = scrollProgress * maxThumbPosition;
 
@@ -197,36 +295,41 @@
 	}
 
 	function updateScrollbarAppearance(): void {
-		const { thumbHeight, thumbPosition, visible } = calculateScrollbarDimensions();
-		
+		const { thumbHeight, thumbPosition, visible } =
+			calculateScrollbarDimensions();
+
 		if (visible) {
-			customScrollbar.classList.remove('hidden');
+			customScrollbar.classList.remove("hidden");
 			scrollbarThumb.style.height = `${thumbHeight}px`;
 			scrollbarThumb.style.top = `${thumbPosition}px`;
 		} else {
-			customScrollbar.classList.add('hidden');
+			customScrollbar.classList.add("hidden");
 		}
 	}
 
 	function generateHexDump(buffer: ArrayBuffer, fileOffset: number): string {
 		const bytes = new Uint8Array(buffer);
-		let output = '';
+		let output = "";
 
 		for (let i = 0; i < bytes.length; i += BYTES_PER_LINE) {
 			const actualOffset = fileOffset + i;
-			const lineOffset = actualOffset.toString(16).padStart(8, '0').toUpperCase();
-			let hexPart = '';
-			let textPart = '';
+			const lineOffset = actualOffset
+				.toString(16)
+				.padStart(8, "0")
+				.toUpperCase();
+			let hexPart = "";
+			let textPart = "";
 
 			for (let j = 0; j < BYTES_PER_LINE; j++) {
 				const byteIndex = i + j;
+				
 				if (byteIndex < bytes.length) {
 					const byte = bytes[byteIndex];
-					hexPart += byteToHex(byte) + ' ';
+					hexPart += byteToHex(byte) + " ";
 					textPart += byteToChar(byte);
 				} else {
-					hexPart += '   ';
-					textPart += ' ';
+					hexPart += "   ";
+					textPart += " ";
 				}
 			}
 
@@ -236,34 +339,53 @@
 		return output;
 	}
 
-	function drawCanvas(buffer: ArrayBuffer, offset: number): void {
+	function drawCanvas(buffer: ArrayBuffer): void {
 		const bytes = new Uint8Array(buffer);
+		const canvasWidth = canvas.width;
 		const canvasHeight = canvas.height;
-		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
-		
-		ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-		for (let y = 0; y < canvasHeight; y++) {
-			for (let x = 0; x < bytesPerCanvasLine; x++) {
-				const bufferIndex = y * bytesPerCanvasLine + x;
-				
-				if (bufferIndex < bytes.length) {
-					const byte = bytes[bufferIndex];
-					ctx.fillStyle = getByteColor(byte);
-					ctx.fillRect(x, y, 1, 1);
-				}
-			}
+		// ImageDataを使用した最適化された描画
+		const imageData = ctx.createImageData(canvasWidth, canvasHeight);
+		const data = imageData.data;
+
+		// 背景を黒で初期化（データがない部分）
+		for (let i = 0; i < data.length; i += 4) {
+			data[i] = 0; // Red
+			data[i + 1] = 0; // Green
+			data[i + 2] = 0; // Blue
+			data[i + 3] = 255; // Alpha
 		}
+
+		// バイトデータを色情報に変換
+		const totalPixels = canvasWidth * canvasHeight;
+		const bytesToProcess = Math.min(bytes.length, totalPixels);
+
+		for (let i = 0; i < bytesToProcess; i++) {
+			const byte = bytes[i];
+			const color = getByteColorRGB(byte);
+			const pixelIndex = i * 4;
+
+			data[pixelIndex] = color.r; // Red
+			data[pixelIndex + 1] = color.g; // Green
+			data[pixelIndex + 2] = color.b; // Blue
+			data[pixelIndex + 3] = 255; // Alpha
+		}
+
+		// 一度に全体を描画
+		ctx.putImageData(imageData, 0, 0);
 	}
 
-	function setLoadingState(loading: boolean, message: string = 'Ready'): void {
+	function setLoadingState(
+		loading: boolean,
+		message: string = "Ready",
+	): void {
 		isLoading = loading;
 		if (loading) {
 			statusMessage.textContent = message;
-			statusMessage.classList.add('loading');
+			statusMessage.classList.add("loading");
 		} else {
-			statusMessage.textContent = 'Ready';
-			statusMessage.classList.remove('loading');
+			statusMessage.textContent = "Ready";
+			statusMessage.classList.remove("loading");
 		}
 	}
 
@@ -273,33 +395,38 @@
 		// キャッシュチェック：同じオフセットの場合はスキップ
 		if (lastUpdateOffset === currentOffset) return;
 
-		setLoadingState(true, 'Loading file data...');
+		setLoadingState(true, "Loading file data...");
 		lastUpdateOffset = currentOffset;
 
 		try {
-			// Hexdump用のチャンクを読み込み
-			const hexBuffer = await loadChunk(currentOffset, CHUNK_SIZE);
+			// Hexdump用のチャンクを読み込み（ファイル終端を考慮）
+			const remainingBytes = totalFileSize - currentOffset;
+			const readSize = Math.min(CHUNK_SIZE, remainingBytes);
+			const hexBuffer = await loadChunk(currentOffset, readSize);
 			if (hexBuffer) {
 				const hexDump = generateHexDump(hexBuffer, currentOffset);
-				hexOutput.textContent = hexDump;
+				hexOutput.innerHTML = hexDump; // HTMLとして表示
 			}
 
 			// Canvas用のチャンクを読み込み（より大きなチャンク）
-			setLoadingState(true, 'Rendering canvas...');
-			const canvasBuffer = await loadChunk(currentOffset, CANVAS_CHUNK_SIZE);
+			setLoadingState(true, "Rendering canvas...");
+			const canvasBuffer = await loadChunk(
+				currentOffset,
+				CANVAS_CHUNK_SIZE,
+			);
 			if (canvasBuffer) {
-				drawCanvas(canvasBuffer, currentOffset);
-				canvas.classList.add('loaded');
+				drawCanvas(canvasBuffer);
+				canvas.classList.add("loaded");
 			}
 
 			// スクロール情報を更新
-			const percentage = totalFileSize > 0 ? (currentOffset / Math.max(1, totalFileSize - CHUNK_SIZE)) * 100 : 0;
+			const maxOffset = getMaxOffset();
+			const percentage = maxOffset > 0 ? (currentOffset / maxOffset) * 100 : 0;
 			updateScrollInfo(Math.min(percentage, 100), currentOffset);
 			updateScrollbarAppearance();
-
 		} catch (error) {
-			console.error('Error updating display:', error);
-			setLoadingState(false, 'Error loading file');
+			console.error("Error updating display:", error);
+			setLoadingState(false, "Error loading file");
 		} finally {
 			setLoadingState(false);
 		}
@@ -307,15 +434,15 @@
 
 	function handleThumbMouseDown(event: MouseEvent): void {
 		if (!currentFile) return;
-		
+
 		isDragging = true;
 		dragStartY = event.clientY;
 		dragStartOffset = currentOffset;
-		
-		scrollbarThumb.classList.add('dragging');
-		document.addEventListener('mousemove', handleThumbMouseMove);
-		document.addEventListener('mouseup', handleThumbMouseUp);
-		
+
+		scrollbarThumb.classList.add("dragging");
+		document.addEventListener("mousemove", handleThumbMouseMove);
+		document.addEventListener("mouseup", handleThumbMouseUp);
+
 		event.preventDefault();
 	}
 
@@ -323,66 +450,69 @@
 
 	function handleThumbMouseMove(event: MouseEvent): void {
 		if (!isDragging || !currentFile) return;
-		
+
 		const deltaY = event.clientY - dragStartY;
 		const trackHeight = scrollbarTrack.clientHeight;
 		const { thumbHeight } = calculateScrollbarDimensions();
 		const maxThumbPosition = trackHeight - thumbHeight;
-		
+
 		if (maxThumbPosition <= 0) return;
-		
+
 		const scrollRatio = deltaY / maxThumbPosition;
-		const maxOffset = totalFileSize - CHUNK_SIZE;
-		const newOffset = dragStartOffset + (scrollRatio * maxOffset);
-		
+		const maxOffset = getMaxOffset();
+		const newOffset = dragStartOffset + scrollRatio * maxOffset;
+
 		currentOffset = Math.max(0, Math.min(maxOffset, newOffset));
-		currentOffset = Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
-		
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
 		throttledUpdateDisplay();
 	}
 
 	function handleThumbMouseUp(): void {
 		if (!isDragging) return;
-		
+
 		isDragging = false;
-		scrollbarThumb.classList.remove('dragging');
-		document.removeEventListener('mousemove', handleThumbMouseMove);
-		document.removeEventListener('mouseup', handleThumbMouseUp);
+		scrollbarThumb.classList.remove("dragging");
+		document.removeEventListener("mousemove", handleThumbMouseMove);
+		document.removeEventListener("mouseup", handleThumbMouseUp);
 	}
 
 	function handleTrackClick(event: MouseEvent): void {
 		if (!currentFile || event.target === scrollbarThumb) return;
-		
+
 		const rect = scrollbarTrack.getBoundingClientRect();
 		const clickY = event.clientY - rect.top;
 		const trackHeight = scrollbarTrack.clientHeight;
 		const { thumbHeight } = calculateScrollbarDimensions();
 		const maxThumbPosition = trackHeight - thumbHeight;
-		
+
 		if (maxThumbPosition <= 0) return;
-		
+
 		const scrollRatio = Math.max(0, Math.min(1, clickY / trackHeight));
-		const maxOffset = totalFileSize - CHUNK_SIZE;
-		currentOffset = Math.floor((scrollRatio * maxOffset) / BYTES_PER_LINE) * BYTES_PER_LINE;
-		
+		const maxOffset = getMaxOffset();
+		currentOffset =
+			Math.floor((scrollRatio * maxOffset) / BYTES_PER_LINE) *
+			BYTES_PER_LINE;
+
 		updateDisplay(); // クリック時は即座に更新
 	}
 
 	async function handleFileChange(event: Event): Promise<void> {
 		const target = event.target as HTMLInputElement;
 		const file = target.files?.[0];
-		
+
 		if (!file) {
 			currentFile = null;
 			totalFileSize = 0;
 			currentOffset = 0;
 			lastUpdateOffset = -1; // キャッシュリセット
-			customScrollbar.classList.add('hidden');
-			hexOutput.textContent = '';
+			customScrollbar.classList.add("hidden");
+			hexOutput.textContent = "";
 			ctx.clearRect(0, 0, canvas.width, canvas.height);
 			updateScrollInfo(0, 0);
-			statusMessage.textContent = 'Ready';
-			statusMessage.classList.remove('loading');
+			statusMessage.textContent = "Ready";
+			statusMessage.classList.remove("loading");
 			return;
 		}
 
@@ -390,31 +520,34 @@
 		totalFileSize = file.size;
 		currentOffset = 0;
 		lastUpdateOffset = -1; // キャッシュリセット
-		
+
 		fileName.textContent = file.name;
 		fileSize.textContent = formatFileSize(file.size);
+
+		// 表示行数を動的に計算して更新
+		updateChunkSize();
 
 		try {
 			await updateDisplay();
 		} catch (error) {
-			console.error('Error reading file:', error);
-			statusMessage.textContent = 'Error loading file';
-			statusMessage.classList.remove('loading');
+			console.error("Error reading file:", error);
+			statusMessage.textContent = "Error loading file";
+			statusMessage.classList.remove("loading");
 		}
 	}
 
-	fileInput.addEventListener('change', handleFileChange);
-	
+	fileInput.addEventListener("change", handleFileChange);
+
 	// ホイールスクロールハンドラー
 	function handleWheelScroll(event: WheelEvent): void {
 		if (!currentFile) return;
-		
+
 		event.preventDefault();
-		
+
 		const scrollLines = 3; // 一度にスクロールする行数
 		const scrollAmount = scrollLines * BYTES_PER_LINE;
-		const maxOffset = totalFileSize - CHUNK_SIZE;
-		
+		const maxOffset = getMaxOffset();
+
 		if (event.deltaY > 0) {
 			// 下スクロール
 			currentOffset = Math.min(maxOffset, currentOffset + scrollAmount);
@@ -422,64 +555,247 @@
 			// 上スクロール
 			currentOffset = Math.max(0, currentOffset - scrollAmount);
 		}
-		
-		currentOffset = Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
 		throttledUpdateDisplay();
 	}
 
 	// キーボード操作ハンドラー
 	function handleKeyDown(event: KeyboardEvent): void {
 		if (!currentFile) return;
-		
-		const maxOffset = totalFileSize - CHUNK_SIZE;
+
+		const maxOffset = getMaxOffset();
 		const pageSize = LINES_TO_DISPLAY * BYTES_PER_LINE;
-		
+
 		let handled = false;
-		
+
 		switch (event.key) {
-			case 'ArrowUp':
+			case "ArrowUp":
 				currentOffset = Math.max(0, currentOffset - BYTES_PER_LINE);
 				handled = true;
 				break;
-			case 'ArrowDown':
-				currentOffset = Math.min(maxOffset, currentOffset + BYTES_PER_LINE);
+			case "ArrowDown":
+				currentOffset = Math.min(
+					maxOffset,
+					currentOffset + BYTES_PER_LINE,
+				);
 				handled = true;
 				break;
-			case 'PageUp':
+			case "PageUp":
 				currentOffset = Math.max(0, currentOffset - pageSize);
 				handled = true;
 				break;
-			case 'PageDown':
+			case "PageDown":
 				currentOffset = Math.min(maxOffset, currentOffset + pageSize);
 				handled = true;
 				break;
-			case 'Home':
+			case "Home":
 				currentOffset = 0;
 				handled = true;
 				break;
-			case 'End':
+			case "End":
 				currentOffset = maxOffset;
 				handled = true;
 				break;
 		}
-		
+
 		if (handled) {
 			event.preventDefault();
-			currentOffset = Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+			currentOffset =
+				Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
 			throttledUpdateDisplay();
 		}
 	}
 
 	// スクロールバーのイベントリスナー
-	scrollbarThumb.addEventListener('mousedown', handleThumbMouseDown);
-	scrollbarTrack.addEventListener('click', handleTrackClick);
-	
+	scrollbarThumb.addEventListener("mousedown", handleThumbMouseDown);
+	scrollbarTrack.addEventListener("click", handleTrackClick);
+
 	// hex-outputエリアのイベントリスナー
-	hexOutput.addEventListener('wheel', handleWheelScroll, { passive: false });
-	
+	hexOutput.addEventListener("wheel", handleWheelScroll, { passive: false });
+
 	// キーボードイベントリスナー（フォーカスが必要）
-	hexOutput.setAttribute('tabindex', '0');
-	hexOutput.addEventListener('keydown', handleKeyDown);
+	hexOutput.setAttribute("tabindex", "0");
+	hexOutput.addEventListener("keydown", handleKeyDown);
+
+	// 初期化時に動的行数を計算
+	document.addEventListener("DOMContentLoaded", () => {
+		// 少し遅延させて要素のレンダリングを待つ
+		setTimeout(() => {
+			updateChunkSize();
+		}, 100);
+	});
+
+	// ウィンドウリサイズ時の再計算（throttled）
+	const throttledResize = throttle(() => {
+		if (currentFile) {
+			const oldChunkSize = CHUNK_SIZE;
+			updateChunkSize();
+			
+			// チャンクサイズが変更された場合は再描画
+			if (CHUNK_SIZE !== oldChunkSize) {
+				lastUpdateOffset = -1; // キャッシュリセット
+				updateDisplay();
+			}
+		}
+	}, 250); // リサイズは250ms間隔で制限
+
+	window.addEventListener("resize", throttledResize as EventListener);
+
+	// Offset値ジャンプ機能
+	function handleOffsetClick(): void {
+		if (!currentFile) return;
+
+		const input = prompt(
+			"Jump to offset (hexadecimal, e.g., 1000 or 0x1000):",
+			"0x" + currentOffset.toString(16).toUpperCase(),
+		);
+
+		if (input === null) return; // キャンセル
+
+		let targetOffset: number;
+		try {
+			// 16進数として解析（0xプレフィックスの有無を問わない）
+			const cleanInput = input.trim().toLowerCase();
+			if (cleanInput.startsWith("0x")) {
+				targetOffset = parseInt(cleanInput, 16);
+			} else {
+				targetOffset = parseInt(cleanInput, 16);
+			}
+
+			if (isNaN(targetOffset) || targetOffset < 0) {
+				alert("Invalid offset value. Please enter a valid hexadecimal number.");
+				return;
+			}
+
+			// ファイルサイズ内に制限
+			const maxOffset = getMaxOffset();
+			targetOffset = Math.min(targetOffset, maxOffset);
+
+			// 行境界に揃える
+			targetOffset = Math.floor(targetOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+			currentOffset = targetOffset;
+			lastUpdateOffset = -1; // キャッシュリセット
+			updateDisplay();
+		} catch (error) {
+			alert("Invalid offset value. Please enter a valid hexadecimal number.");
+		}
+	}
+
+	// Offset情報をクリック可能にする
+	offsetInfo.addEventListener("click", handleOffsetClick);
+
+	// Canvas上でのクリックジャンプ機能
+	function handleCanvasClick(event: MouseEvent): void {
+		if (!currentFile) return;
+
+		const rect = canvas.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+
+		// Canvas内の座標をピクセル座標に変換
+		const canvasX = Math.floor(x);
+		const canvasY = Math.floor(y);
+
+		// Canvas描画領域内かチェック
+		if (canvasX < 0 || canvasX >= canvas.width || canvasY < 0 || canvasY >= canvas.height) {
+			return;
+		}
+
+		// クリック位置のバイトインデックスを計算
+		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
+		const byteIndex = canvasY * bytesPerCanvasLine + canvasX;
+
+		// 現在のCanvas表示オフセットを考慮してファイル内オフセットを計算
+		const fileByteOffset = currentOffset + byteIndex;
+
+		// ファイルサイズ内かチェック
+		if (fileByteOffset >= totalFileSize) {
+			return;
+		}
+
+		// 16バイト境界に丸めたオフセットを計算
+		const targetOffset = Math.floor(fileByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		// 最大オフセット内に制限
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+
+		// ジャンプ実行
+		if (clampedOffset !== currentOffset) {
+			currentOffset = clampedOffset;
+			lastUpdateOffset = -1; // キャッシュリセット
+			updateDisplay();
+		}
+	}
+
+	// Canvasにクリックイベントリスナーを追加
+	canvas.addEventListener("click", handleCanvasClick);
+
+	// ドラッグ&ドロップ機能
+	function handleDragEnter(event: DragEvent): void {
+		event.preventDefault();
+		dragCounter++;
+		if (dragCounter === 1) {
+			dragOverlay.classList.remove("hidden");
+		}
+	}
+
+	function handleDragOver(event: DragEvent): void {
+		event.preventDefault();
+		event.dataTransfer!.dropEffect = "copy";
+	}
+
+	function handleDragLeave(event: DragEvent): void {
+		event.preventDefault();
+		dragCounter--;
+		if (dragCounter === 0) {
+			dragOverlay.classList.add("hidden");
+		}
+	}
+
+	function handleDrop(event: DragEvent): void {
+		event.preventDefault();
+		dragCounter = 0;
+		dragOverlay.classList.add("hidden");
+
+		const files = event.dataTransfer?.files;
+		if (files && files.length > 0) {
+			const file = files[0];
+			// 既存のhandleFileChange関数のロジックを流用
+			processDroppedFile(file);
+		}
+	}
+
+	async function processDroppedFile(file: File): Promise<void> {
+		currentFile = file;
+		totalFileSize = file.size;
+		currentOffset = 0;
+		lastUpdateOffset = -1; // キャッシュリセット
+
+		fileName.textContent = file.name;
+		fileSize.textContent = formatFileSize(file.size);
+
+		// 表示行数を動的に計算して更新
+		updateChunkSize();
+
+		try {
+			await updateDisplay();
+		} catch (error) {
+			console.error("Error reading file:", error);
+			statusMessage.textContent = "Error loading file";
+			statusMessage.classList.remove("loading");
+		}
+	}
+
+	// ドラッグ&ドロップイベントリスナーをdocumentに追加
+	document.addEventListener("dragenter", handleDragEnter);
+	document.addEventListener("dragover", handleDragOver);
+	document.addEventListener("dragleave", handleDragLeave);
+	document.addEventListener("drop", handleDrop);
+
 </script>
 
 <style>
@@ -573,7 +889,7 @@
 		left: 2px;
 		right: 2px;
 		bottom: 2px;
-		background: #f1f5f9;
+		background: var(--bg-secondary);
 		border-radius: 4px;
 		cursor: pointer;
 	}
@@ -582,7 +898,7 @@
 		position: absolute;
 		left: 0;
 		right: 0;
-		background: #cbd5e1;
+		background: var(--text-muted);
 		border-radius: 4px;
 		cursor: pointer;
 		transition: background-color 0.2s ease;
@@ -591,12 +907,12 @@
 	}
 
 	.scrollbar-thumb:hover {
-		background: #94a3b8;
+		background: var(--text-secondary);
 		opacity: 1;
 	}
 
 	.scrollbar-thumb.dragging {
-		background: #64748b;
+		background: var(--accent-primary);
 		opacity: 1;
 	}
 
@@ -608,6 +924,20 @@
 		color: var(--text-secondary);
 		font-family: var(--font-mono);
 	}
+
+	#offset-info {
+		cursor: pointer;
+		padding: 0.25rem 0.5rem;
+		border-radius: var(--radius-sm);
+		transition: all 0.2s ease;
+	}
+
+	#offset-info:hover {
+		background: var(--bg-card);
+		color: var(--accent-primary);
+		transform: translateY(-1px);
+	}
+
 
 	.canvas-container {
 		display: flex;
@@ -626,15 +956,16 @@
 
 	#hex-canvas {
 		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
 		image-rendering: pixelated;
 		background: var(--bg-tertiary);
 		box-shadow: var(--shadow-md);
 		transition: box-shadow 0.2s ease;
+		cursor: pointer;
 	}
 
 	#hex-canvas:hover {
-		box-shadow: var(--shadow-lg);
+		box-shadow: var(--shadow-lg), 0 0 10px rgba(59, 130, 246, 0.3);
+		border-color: var(--accent-primary);
 	}
 
 	.color-legend {
@@ -666,8 +997,6 @@
 		font-family: var(--font-mono);
 	}
 
-
-
 	/* Status bar */
 	.status-bar {
 		margin-top: 1rem;
@@ -692,7 +1021,7 @@
 	}
 
 	#status-message.loading::after {
-		content: '';
+		content: "";
 		width: 12px;
 		height: 12px;
 		border: 2px solid var(--border-primary);
@@ -704,13 +1033,17 @@
 	}
 
 	@keyframes spin {
-		0% { transform: rotate(0deg); }
-		100% { transform: rotate(360deg); }
+		0% {
+			transform: rotate(0deg);
+		}
+		100% {
+			transform: rotate(360deg);
+		}
 	}
 
 	/* Empty state */
 	.hex-output:empty::before {
-		content: 'Select a file to view its hex dump...';
+		content: "Select a file to view its hex dump...";
 		color: var(--text-muted);
 		font-style: italic;
 		display: flex;
@@ -764,5 +1097,63 @@
 		border-color: var(--accent-success);
 		background: var(--bg-card);
 		color: var(--accent-success);
+	}
+
+	/* ドラッグ&ドロップオーバーレイ */
+	.drag-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100vw;
+		height: 100vh;
+		background: rgba(59, 130, 246, 0.1);
+		backdrop-filter: blur(5px);
+		z-index: 9999;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+		transition: opacity 0.2s ease;
+	}
+
+	.drag-overlay.hidden {
+		opacity: 0;
+		pointer-events: none;
+		display: none;
+	}
+
+	.drag-message {
+		background: var(--bg-card);
+		border: 2px dashed var(--accent-primary);
+		border-radius: var(--radius-lg);
+		padding: 3rem;
+		text-align: center;
+		box-shadow: var(--shadow-xl);
+		transform: scale(0.9);
+		animation: dragPulse 1.5s ease-in-out infinite;
+	}
+
+	.drag-icon {
+		font-size: 4rem;
+		margin-bottom: 1rem;
+		opacity: 0.8;
+	}
+
+	.drag-text {
+		font-size: 1.5rem;
+		font-weight: 600;
+		color: var(--accent-primary);
+		margin: 0;
+	}
+
+	@keyframes dragPulse {
+		0%, 100% {
+			transform: scale(0.9);
+			opacity: 0.8;
+		}
+		50% {
+			transform: scale(1);
+			opacity: 1;
+		}
 	}
 </style>
