@@ -1,67 +1,70 @@
 ---
+import Layout from '../../layouts/Layout.astro';
+import ToolContainer from '../../components/common/ToolContainer.astro';
 ---
 
-<div class="tool-container">
-	<div class="tool-header">
-		<h1>🔐 Password Generator</h1>
-		<p>Generate secure passwords with customizable options</p>
-	</div>
-	
-	<div class="glass-card tool-controls">
-		<div class="control-row">
-			<div class="control-group">
-				<label for="length">Password Length</label>
-				<input type="number" id="length" class="input" min="8" max="128" value="16" />
+<Layout title="Password Generator - Web Toolbox" currentTool="password-generator">
+	<ToolContainer
+		title="Password Generator"
+		description="Generate secure passwords with customizable options"
+		icon="🔐"
+	>
+		<div class="glass-card tool-controls">
+			<div class="control-row">
+				<div class="control-group">
+					<label for="length">Password Length</label>
+					<input type="number" id="length" class="input" min="8" max="128" value="16" />
+				</div>
+				
+				<div class="control-group">
+					<label for="count">Number of Passwords</label>
+					<input type="number" id="count" class="input" min="1" max="20" value="5" />
+				</div>
 			</div>
 			
-			<div class="control-group">
-				<label for="count">Number of Passwords</label>
-				<input type="number" id="count" class="input" min="1" max="20" value="5" />
+			<div class="character-options">
+				<h3>Character Types</h3>
+				<div class="checkbox-grid">
+					<label class="checkbox-group">
+						<input type="checkbox" id="uppercase" class="checkbox" checked />
+						<span>Uppercase (A-Z)</span>
+					</label>
+					<label class="checkbox-group">
+						<input type="checkbox" id="lowercase" class="checkbox" checked />
+						<span>Lowercase (a-z)</span>
+					</label>
+					<label class="checkbox-group">
+						<input type="checkbox" id="numbers" class="checkbox" checked />
+						<span>Numbers (0-9)</span>
+					</label>
+					<label class="checkbox-group">
+						<input type="checkbox" id="symbols" class="checkbox" checked />
+						<span>Symbols (!@#$%^&*)</span>
+					</label>
+				</div>
 			</div>
-		</div>
-		
-		<div class="character-options">
-			<h3>Character Types</h3>
-			<div class="checkbox-grid">
-				<label class="checkbox-group">
-					<input type="checkbox" id="uppercase" class="checkbox" checked />
-					<span>Uppercase (A-Z)</span>
-				</label>
-				<label class="checkbox-group">
-					<input type="checkbox" id="lowercase" class="checkbox" checked />
-					<span>Lowercase (a-z)</span>
-				</label>
-				<label class="checkbox-group">
-					<input type="checkbox" id="numbers" class="checkbox" checked />
-					<span>Numbers (0-9)</span>
-				</label>
-				<label class="checkbox-group">
-					<input type="checkbox" id="symbols" class="checkbox" checked />
-					<span>Symbols (!@#$%^&*)</span>
-				</label>
-			</div>
-		</div>
-		
-		<button id="generate-btn" class="btn btn-primary">
-			<span>Generate Passwords</span>
-		</button>
-	</div>
-	
-	<div class="glass-card tool-results">
-		<div class="result-header">
-			<h3>Generated Passwords</h3>
-			<button id="copy-btn" class="btn btn-success" disabled>
-				<span>Copy All</span>
+			
+			<button id="generate-btn" class="btn btn-primary">
+				<span>Generate Passwords</span>
 			</button>
 		</div>
-		<textarea 
-			id="password-output" 
-			class="password-textarea" 
-			readonly 
-			placeholder="Click 'Generate Passwords' to create secure passwords..."
-		></textarea>
-	</div>
-</div>
+		
+		<div class="glass-card tool-results">
+			<div class="result-header">
+				<h3>Generated Passwords</h3>
+				<button id="copy-btn" class="btn btn-success" disabled>
+					<span>Copy All</span>
+				</button>
+			</div>
+			<textarea 
+				id="password-output" 
+				class="password-textarea" 
+				readonly 
+				placeholder="Click 'Generate Passwords' to create secure passwords..."
+			></textarea>
+		</div>
+	</ToolContainer>
+</Layout>
 
 <script>
 	const lengthInput = document.getElementById('length') as HTMLInputElement;
@@ -154,13 +157,6 @@
 </script>
 
 <style>
-	.control-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1.5rem;
-		margin-bottom: 1.5rem;
-	}
-
 	.control-group input[type="number"] {
 		width: 100px;
 		max-width: 100%;
@@ -206,7 +202,6 @@
 		color: var(--text-muted);
 		font-style: italic;
 	}
-
 
 	/* Button enhancements */
 	.btn span {
@@ -266,10 +261,4 @@
 	.glass-card:hover {
 		transform: translateY(-2px);
 	}
-
-	.result-header {
-		flex-wrap: wrap;
-		gap: 1rem;
-	}
-
 </style>

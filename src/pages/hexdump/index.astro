@@ -1,0 +1,2749 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import ToolContainer from '../../components/common/ToolContainer.astro';
+import FileInput from '../../components/common/FileInput.astro';
+---
+
+<Layout title="Hex Dump Tool - Web Toolbox" currentTool="hexdump">
+	<ToolContainer
+		title="Hex Dump Tool"
+		description="Binary file analysis with hexdump display and visual representation"
+		icon="📊"
+	>
+		<div class="glass-card tool-controls">
+			<FileInput 
+				id="file-input"
+				accept="*/*"
+				label="📁 Choose Binary File"
+			/>
+		</div>
+
+		<div class="glass-card search-panel">
+			<div class="search-controls">
+				<div class="search-input-group">
+					<input type="text" id="search-input" class="search-input" placeholder="Enter search pattern..." />
+					<div class="search-mode">
+						<label class="search-mode-option">
+							<input type="radio" name="search-mode" value="ascii" checked />
+							<span>ASCII</span>
+						</label>
+						<label class="search-mode-option">
+							<input type="radio" name="search-mode" value="hex" />
+							<span>Hex</span>
+						</label>
+					</div>
+				</div>
+				<button id="search-toggle-btn" class="btn btn-primary" disabled>
+					<span id="search-btn-text">Search</span>
+				</button>
+			</div>
+		</div>
+
+		<div class="viewer-grid">
+			<div class="glass-card hex-output-container">
+				<div class="result-header">
+					<h3>Hex Dump Output</h3>
+					<div class="format-info">16 bytes per line</div>
+				</div>
+				<div class="hex-display-wrapper">
+					<div id="hex-output" class="hex-output"></div>
+					<div class="custom-scrollbar" id="custom-scrollbar">
+						<div class="scrollbar-track" id="scrollbar-track">
+							<div class="scrollbar-thumb" id="scrollbar-thumb"></div>
+						</div>
+					</div>
+				</div>
+				<div class="scroll-info">
+					<span id="scroll-position">0%</span>
+					<span id="offset-info">Offset: 0x00000000</span>
+				</div>
+			</div>
+
+			<div class="glass-card canvas-container">
+				<div class="result-header">
+					<h3>Visual Representation</h3>
+					<div class="format-info">256 bytes per line</div>
+				</div>
+				<div class="canvas-wrapper">
+					<canvas id="hex-canvas" width="256" height="400"></canvas>
+					<div class="color-legend">
+						<div class="legend-item">
+							<div
+								class="color-sample"
+								style="background: #FFFFFF; border: 1px solid var(--border-primary);"
+							>
+							</div>
+							<span>0x00</span>
+						</div>
+						<div class="legend-item">
+							<div class="color-sample" style="background: #00FFFF;">
+							</div>
+							<span>0x01-0x1F</span>
+						</div>
+						<div class="legend-item">
+							<div class="color-sample" style="background: #FF0000;">
+							</div>
+							<span>0x20-0x7E</span>
+						</div>
+						<div class="legend-item">
+							<div class="color-sample" style="background: #000000;">
+							</div>
+							<span>0x80-0xFF</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="status-bar">
+			<span id="status-message" class="status-message">Ready</span>
+		</div>
+		
+		<!-- ドラッグ&ドロップオーバーレイ -->
+		<div id="drag-overlay" class="drag-overlay hidden">
+			<div class="drag-message">
+				<div class="drag-icon">📁</div>
+				<div class="drag-text">Drop file here to analyze</div>
+			</div>
+		</div>
+	</ToolContainer>
+</Layout>
+
+<script>
+	const fileInput = document.getElementById("file-input") as HTMLInputElement;
+	const fileName = document.getElementById("file-input-name") as HTMLSpanElement;
+	const fileSize = document.getElementById("file-input-size") as HTMLSpanElement;
+	const hexOutput = document.getElementById("hex-output") as HTMLDivElement;
+	const canvas = document.getElementById("hex-canvas") as HTMLCanvasElement;
+	const ctx = canvas.getContext("2d", { willReadFrequently: false })!;
+
+	ctx.imageSmoothingEnabled = false;
+	const customScrollbar = document.getElementById(
+		"custom-scrollbar",
+	) as HTMLDivElement;
+	const scrollbarTrack = document.getElementById(
+		"scrollbar-track",
+	) as HTMLDivElement;
+	const scrollbarThumb = document.getElementById(
+		"scrollbar-thumb",
+	) as HTMLDivElement;
+	const scrollPosition = document.getElementById(
+		"scroll-position",
+	) as HTMLSpanElement;
+	const offsetInfo = document.getElementById(
+		"offset-info",
+	) as HTMLSpanElement;
+	const statusMessage = document.getElementById(
+		"status-message",
+	) as HTMLSpanElement;
+	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
+	
+	const searchInput = document.getElementById("search-input") as HTMLInputElement;
+	const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
+	const searchBtnText = document.getElementById("search-btn-text") as HTMLSpanElement;
+	const searchModeInputs = document.querySelectorAll('input[name="search-mode"]') as NodeListOf<HTMLInputElement>;
+
+	let currentFile: File | null = null;
+	let totalFileSize = 0;
+	let currentOffset = 0;
+	let isDragging = false;
+	let dragStartY = 0;
+	let dragStartOffset = 0;
+	let isLoading = false;
+	let lastUpdateOffset = -1;
+	let dragCounter = 0;
+	
+	let canvasCurrentOffset = 0;
+	let lastCanvasUpdateOffset = -1;
+	
+	let isSyncingToCanvas = false;
+	let isSyncingToHexDump = false;
+	
+	let isSearching = false;
+	let searchResultOffset = -1;
+	let searchPattern: Uint8Array | null = null;
+	let searchWorker: Worker | null = null;
+	
+	const BYTES_PER_LINE = 16;
+	const CANVAS_BYTES_PER_LINE = 256;
+	let LINES_TO_DISPLAY = 50;
+	let CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE;
+	
+	let CANVAS_LINES_TO_DISPLAY = 400;
+	let CANVAS_CHUNK_SIZE = CANVAS_LINES_TO_DISPLAY * CANVAS_BYTES_PER_LINE;
+	
+	const MIN_THUMB_HEIGHT = 20;
+	const MIN_LINES = 10;
+	const MAX_LINES = 100;
+
+	function throttle(func: Function, delay: number): Function {
+		let timeoutId: number | null | NodeJS.Timeout = null;
+		let lastExecTime = 0;
+		return function (...args: any[]) {
+			const currentTime = Date.now();
+			if (currentTime - lastExecTime > delay) {
+				func(...args);
+				lastExecTime = currentTime;
+			} else if (!timeoutId) {
+				timeoutId = setTimeout(
+					() => {
+						func(...args);
+						lastExecTime = Date.now();
+						timeoutId = null;
+					},
+					delay - (currentTime - lastExecTime),
+				);
+			}
+		};
+	}
+
+	function calculateVisibleLines(): number {
+		try {
+			const wrapper = document.querySelector('.hex-display-wrapper') as HTMLElement;
+			if (!wrapper) {
+				return 35;
+			}
+
+			const wrapperHeight = wrapper.clientHeight;
+			if (wrapperHeight === 0) {
+				return 35;
+			}
+
+			const padding = 32;
+			const availableHeight = wrapperHeight - padding;
+
+			const fontSize = 0.8 * 16;
+			const lineHeight = fontSize * 1.4;
+
+			const visibleLines = Math.floor(availableHeight / lineHeight);
+
+			console.log(`Wrapper height: ${wrapperHeight}px, Available height: ${availableHeight}px, Lines: ${visibleLines}`);
+
+			return Math.max(MIN_LINES, Math.min(MAX_LINES, visibleLines));
+		} catch (error) {
+			console.warn("Failed to calculate visible lines:", error);
+			return 35;
+		}
+	}
+
+	function updateChunkSize(): void {
+		LINES_TO_DISPLAY = calculateVisibleLines();
+		CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE;
+		console.log(
+			`Updated display lines: ${LINES_TO_DISPLAY}, chunk size: ${CHUNK_SIZE}`,
+		);
+	}
+
+	function hexDumpOffsetToCanvasOffset(hexOffset: number): number {
+		const canvasHalfHeight = CANVAS_LINES_TO_DISPLAY / 2;
+		const targetCanvasLine = Math.floor(hexOffset / CANVAS_BYTES_PER_LINE);
+		const centeredCanvasOffset = Math.max(0, (targetCanvasLine - canvasHalfHeight)) * CANVAS_BYTES_PER_LINE;
+		return Math.floor(centeredCanvasOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+	}
+
+	function canvasOffsetToHexDumpOffset(canvasOffset: number): number {
+		return Math.floor(canvasOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes === 0) return "0 Bytes";
+		const k = 1024;
+		const sizes = ["Bytes", "KB", "MB", "GB"];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+	}
+
+	const HEX_TABLE = Array.from({ length: 256 }, (_, i) => 
+		i.toString(16).padStart(2, "0").toUpperCase()
+	);
+
+	const CHAR_TABLE = (() => {
+		const table = new Array(256);
+		for (let i = 0; i < 256; i++) {
+			if (i >= 0x20 && i <= 0x7e) {
+				switch (i) {
+					case 0x3C:
+						table[i] = "&lt;";
+						break;
+					case 0x3E:
+						table[i] = "&gt;";
+						break;
+					case 0x26:
+						table[i] = "&amp;";
+						break;
+					case 0x22:
+						table[i] = "&quot;";
+						break;
+					case 0x27:
+						table[i] = "&#x27;";
+						break;
+					default:
+						table[i] = String.fromCharCode(i);
+				}
+			} else {
+				table[i] = ".";
+			}
+		}
+		return table;
+	})();
+
+	function byteToHex(byte: number): string {
+		return HEX_TABLE[byte];
+	}
+
+	function byteToChar(byte: number): string {
+		return CHAR_TABLE[byte];
+	}
+
+	function getByteColorRGB(byte: number): {
+		r: number;
+		g: number;
+		b: number;
+	} {
+		if (byte === 0x00) return { r: 255, g: 255, b: 255 };
+		if (byte >= 0x01 && byte <= 0x1f) return { r: 0, g: 255, b: 255 };
+		if (byte >= 0x20 && byte <= 0x7e) return { r: 255, g: 0, b: 0 };
+		return { r: 0, g: 0, b: 0 };
+	}
+
+	async function loadChunk(
+		offset: number,
+		size: number,
+	): Promise<ArrayBuffer | null> {
+		if (!currentFile) return null;
+
+		const start = Math.max(0, offset);
+		const end = Math.min(currentFile.size, offset + size);
+
+		if (start >= end) return null;
+
+		try {
+			const slice = currentFile.slice(start, end);
+			return await slice.arrayBuffer();
+		} catch (error) {
+			console.error("Error loading chunk:", error);
+			return null;
+		}
+	}
+
+	function updateScrollInfo(percentage: number, offset: number): void {
+		scrollPosition.textContent = `${percentage.toFixed(1)}%`;
+		offsetInfo.textContent = `Offset: 0x${offset.toString(16).padStart(8, "0").toUpperCase()}`;
+	}
+
+	function getMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
+			return 0;
+		}
+		
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+	function calculateScrollbarDimensions(): {
+		thumbHeight: number;
+		thumbPosition: number;
+		visible: boolean;
+	} {
+		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
+			return { thumbHeight: 0, thumbPosition: 0, visible: false };
+		}
+
+		const trackHeight = scrollbarTrack.clientHeight;
+		const visibleRatio = CHUNK_SIZE / totalFileSize;
+		const thumbHeight = Math.max(
+			MIN_THUMB_HEIGHT,
+			trackHeight * visibleRatio,
+		);
+
+		const maxOffset = getMaxOffset();
+		const scrollProgress = maxOffset > 0 ? currentOffset / maxOffset : 0;
+		const maxThumbPosition = trackHeight - thumbHeight;
+		const thumbPosition = scrollProgress * maxThumbPosition;
+
+		return { thumbHeight, thumbPosition, visible: true };
+	}
+
+	function getCanvasMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CANVAS_CHUNK_SIZE) {
+			return 0;
+		}
+		
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+	async function updateCanvasDisplay(): Promise<void> {
+		if (!currentFile || lastCanvasUpdateOffset === canvasCurrentOffset) {
+			return;
+		}
+
+		lastCanvasUpdateOffset = canvasCurrentOffset;
+
+		try {
+			const canvasBuffer = await loadChunk(
+				canvasCurrentOffset,
+				CANVAS_CHUNK_SIZE,
+			);
+			if (canvasBuffer) {
+				drawCanvas(canvasBuffer);
+				canvas.classList.add("loaded");
+			}
+
+			if (!isSyncingToCanvas) {
+				isSyncingToHexDump = true;
+				const newHexDumpOffset = canvasOffsetToHexDumpOffset(canvasCurrentOffset);
+				if (newHexDumpOffset !== currentOffset) {
+					currentOffset = newHexDumpOffset;
+					await updateDisplay();
+				}
+				isSyncingToHexDump = false;
+			}
+
+		} catch (error) {
+			console.error("Error updating canvas display:", error);
+		}
+	}
+
+	const throttledUpdateCanvasDisplay = throttle(updateCanvasDisplay, 100);
+
+	function updateScrollbarAppearance(): void {
+		const { thumbHeight, thumbPosition, visible } =
+			calculateScrollbarDimensions();
+
+		if (visible) {
+			customScrollbar.classList.remove("hidden");
+			scrollbarThumb.style.height = `${thumbHeight}px`;
+			scrollbarThumb.style.top = `${thumbPosition}px`;
+		} else {
+			customScrollbar.classList.add("hidden");
+		}
+	}
+
+	function generateHexDump(buffer: ArrayBuffer, fileOffset: number): string {
+		const bytes = new Uint8Array(buffer);
+		let output = "";
+		for (let i = 0; i < bytes.length; i += BYTES_PER_LINE) {
+			const actualOffset = fileOffset + i;
+			const lineOffset = actualOffset
+				.toString(16)
+				.padStart(8, "0")
+				.toUpperCase();
+			let hexPart = "";
+			let textPart = "";
+
+			for (let j = 0; j < BYTES_PER_LINE; j++) {
+				const byteIndex = i + j;
+				const currentByteOffset = fileOffset + byteIndex;
+				
+				if (byteIndex < bytes.length) {
+					const byte = bytes[byteIndex];
+					let hexByte = byteToHex(byte);
+					let textByte = byteToChar(byte);
+					
+					if (searchResultOffset !== -1 && searchPattern) {
+						const searchEnd = searchResultOffset + searchPattern.length - 1;
+						if (currentByteOffset >= searchResultOffset && currentByteOffset <= searchEnd) {
+							hexByte = `<span class="search-highlight">${hexByte}</span>`;
+							textByte = `<span class="search-highlight">${textByte}</span>`;
+						}
+					}
+					
+					hexPart += hexByte + " ";
+					textPart += textByte;
+				} else {
+					hexPart += "   ";
+					textPart += " ";
+				}
+			}
+
+			output += `${lineOffset}: ${hexPart} |${textPart}|\n`;
+		}
+
+		return output;
+	}
+
+	function drawCanvas(buffer: ArrayBuffer): void {
+		const bytes = new Uint8Array(buffer);
+		const canvasWidth = canvas.width;
+		const canvasHeight = canvas.height;
+
+		const imageData = ctx.createImageData(canvasWidth, canvasHeight);
+		const data = imageData.data;
+
+		for (let i = 0; i < data.length; i += 4) {
+			data[i] = 0;
+			data[i + 1] = 0;
+			data[i + 2] = 0;
+			data[i + 3] = 255;
+		}
+
+		const totalPixels = canvasWidth * canvasHeight;
+		const bytesToProcess = Math.min(bytes.length, totalPixels);
+
+		for (let i = 0; i < bytesToProcess; i++) {
+			const byte = bytes[i];
+			const color = getByteColorRGB(byte);
+			const pixelIndex = i * 4;
+
+			data[pixelIndex] = color.r;
+			data[pixelIndex + 1] = color.g;
+			data[pixelIndex + 2] = color.b;
+			data[pixelIndex + 3] = 255;
+		}
+
+		ctx.putImageData(imageData, 0, 0);
+	}
+
+	function setLoadingState(
+		loading: boolean,
+		message: string = "Ready",
+	): void {
+		isLoading = loading;
+		if (loading) {
+			statusMessage.textContent = message;
+			statusMessage.classList.add("loading");
+		} else {
+			statusMessage.textContent = "Ready";
+			statusMessage.classList.remove("loading");
+		}
+	}
+
+	async function updateDisplay(): Promise<void> {
+		if (!currentFile || isLoading) return;
+
+		if (lastUpdateOffset === currentOffset) return;
+
+		setLoadingState(true, "Loading file data...");
+		lastUpdateOffset = currentOffset;
+
+		try {
+			const remainingBytes = totalFileSize - currentOffset;
+			const readSize = Math.min(CHUNK_SIZE, remainingBytes);
+			const hexBuffer = await loadChunk(currentOffset, readSize);
+			if (hexBuffer) {
+				const hexDump = generateHexDump(hexBuffer, currentOffset);
+				hexOutput.innerHTML = hexDump;
+			}
+
+			const maxOffset = getMaxOffset();
+			const percentage = maxOffset > 0 ? (currentOffset / maxOffset) * 100 : 0;
+			updateScrollInfo(Math.min(percentage, 100), currentOffset);
+			updateScrollbarAppearance();
+			
+			if (!isSyncingToHexDump) {
+				isSyncingToCanvas = true;
+				const newCanvasOffset = hexDumpOffsetToCanvasOffset(currentOffset);
+				if (newCanvasOffset !== canvasCurrentOffset) {
+					canvasCurrentOffset = newCanvasOffset;
+					await updateCanvasDisplay();
+				}
+				isSyncingToCanvas = false;
+			}
+		} catch (error) {
+			console.error("Error updating display:", error);
+			setLoadingState(false, "Error loading file");
+		} finally {
+			setLoadingState(false);
+		}
+	}
+
+	function handleThumbMouseDown(event: MouseEvent): void {
+		if (!currentFile || isSearching) return;
+
+		isDragging = true;
+		dragStartY = event.clientY;
+		dragStartOffset = currentOffset;
+
+		scrollbarThumb.classList.add("dragging");
+		document.addEventListener("mousemove", handleThumbMouseMove);
+		document.addEventListener("mouseup", handleThumbMouseUp);
+
+		event.preventDefault();
+	}
+
+	const throttledUpdateDisplay = throttle(updateDisplay, 16);
+
+	function handleThumbMouseMove(event: MouseEvent): void {
+		if (!isDragging || !currentFile || isSearching) return;
+
+		const deltaY = event.clientY - dragStartY;
+		const trackHeight = scrollbarTrack.clientHeight;
+		const { thumbHeight } = calculateScrollbarDimensions();
+		const maxThumbPosition = trackHeight - thumbHeight;
+
+		if (maxThumbPosition <= 0) return;
+
+		const scrollRatio = deltaY / maxThumbPosition;
+		const maxOffset = getMaxOffset();
+		const newOffset = dragStartOffset + scrollRatio * maxOffset;
+
+		currentOffset = Math.max(0, Math.min(maxOffset, newOffset));
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		throttledUpdateDisplay();
+	}
+
+	function handleThumbMouseUp(): void {
+		if (!isDragging) return;
+
+		isDragging = false;
+		scrollbarThumb.classList.remove("dragging");
+		document.removeEventListener("mousemove", handleThumbMouseMove);
+		document.removeEventListener("mouseup", handleThumbMouseUp);
+	}
+
+	function handleTrackClick(event: MouseEvent): void {
+		if (!currentFile || event.target === scrollbarThumb || isSearching) return;
+
+		const rect = scrollbarTrack.getBoundingClientRect();
+		const clickY = event.clientY - rect.top;
+		const trackHeight = scrollbarTrack.clientHeight;
+		const { thumbHeight } = calculateScrollbarDimensions();
+		const maxThumbPosition = trackHeight - thumbHeight;
+
+		if (maxThumbPosition <= 0) return;
+
+		const scrollRatio = Math.max(0, Math.min(1, clickY / trackHeight));
+		const maxOffset = getMaxOffset();
+		currentOffset =
+			Math.floor((scrollRatio * maxOffset) / BYTES_PER_LINE) *
+			BYTES_PER_LINE;
+
+		updateDisplay();
+	}
+
+	function handleCanvasWheelScroll(event: WheelEvent): void {
+		if (!currentFile || isSearching) return;
+
+		event.preventDefault();
+
+		const pageScrollLines = Math.floor(CANVAS_LINES_TO_DISPLAY / 3);
+		const scrollAmount = pageScrollLines * CANVAS_BYTES_PER_LINE;
+		const maxOffset = getCanvasMaxOffset();
+
+		if (event.deltaY > 0) {
+			canvasCurrentOffset = Math.min(maxOffset, canvasCurrentOffset + scrollAmount);
+		} else {
+			canvasCurrentOffset = Math.max(0, canvasCurrentOffset - scrollAmount);
+		}
+
+		canvasCurrentOffset = Math.floor(canvasCurrentOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		throttledUpdateCanvasDisplay();
+	}
+
+	function clearFileSelection(): void {
+		currentFile = null;
+		totalFileSize = 0;
+		currentOffset = 0;
+		lastUpdateOffset = -1;
+		
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
+		
+		customScrollbar.classList.add("hidden");
+		hexOutput.textContent = "";
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		updateScrollInfo(0, 0);
+		setLoadingState(false, "Ready");
+		
+		searchResultOffset = -1;
+		searchPattern = null;
+		
+		updateSearchButtonState();
+	}
+
+	async function loadFile(file: File): Promise<void> {
+		currentFile = file;
+		totalFileSize = file.size;
+		currentOffset = 0;
+		lastUpdateOffset = -1;
+		
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
+
+		fileName.textContent = file.name;
+		fileSize.textContent = formatFileSize(file.size);
+
+		updateChunkSize();
+		
+		updateSearchButtonState();
+		
+		searchResultOffset = -1;
+		searchPattern = null;
+
+		try {
+			await updateDisplay();
+			await updateCanvasDisplay();
+		} catch (error) {
+			console.error("Error reading file:", error);
+			setLoadingState(false, "Error loading file");
+		}
+	}
+
+	async function handleFileChange(event: Event): Promise<void> {
+		if (isSearching) return;
+		
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+
+		if (!file) {
+			clearFileSelection();
+			return;
+		}
+
+		await loadFile(file);
+	}
+
+	fileInput.addEventListener("change", handleFileChange);
+
+	function handleWheelScroll(event: WheelEvent): void {
+		if (!currentFile || isSearching) return;
+
+		event.preventDefault();
+
+		const scrollLines = 3;
+		const scrollAmount = scrollLines * BYTES_PER_LINE;
+		const maxOffset = getMaxOffset();
+
+		if (event.deltaY > 0) {
+			currentOffset = Math.min(maxOffset, currentOffset + scrollAmount);
+		} else {
+			currentOffset = Math.max(0, currentOffset - scrollAmount);
+		}
+
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		throttledUpdateDisplay();
+	}
+
+	function handleKeyDown(event: KeyboardEvent): void {
+		if (!currentFile || isSearching) return;
+
+		const maxOffset = getMaxOffset();
+		const pageSize = LINES_TO_DISPLAY * BYTES_PER_LINE;
+
+		let handled = false;
+
+		switch (event.key) {
+			case "ArrowUp":
+				currentOffset = Math.max(0, currentOffset - BYTES_PER_LINE);
+				handled = true;
+				break;
+			case "ArrowDown":
+				currentOffset = Math.min(
+					maxOffset,
+					currentOffset + BYTES_PER_LINE,
+				);
+				handled = true;
+				break;
+			case "PageUp":
+				currentOffset = Math.max(0, currentOffset - pageSize);
+				handled = true;
+				break;
+			case "PageDown":
+				currentOffset = Math.min(maxOffset, currentOffset + pageSize);
+				handled = true;
+				break;
+			case "Home":
+				currentOffset = 0;
+				handled = true;
+				break;
+			case "End":
+				currentOffset = maxOffset;
+				handled = true;
+				break;
+		}
+
+		if (handled) {
+			event.preventDefault();
+			currentOffset =
+				Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+			throttledUpdateDisplay();
+		}
+	}
+
+	scrollbarThumb.addEventListener("mousedown", handleThumbMouseDown);
+	scrollbarTrack.addEventListener("click", handleTrackClick);
+
+	hexOutput.addEventListener("wheel", handleWheelScroll, { passive: false });
+	
+	canvas.addEventListener("wheel", handleCanvasWheelScroll, { passive: false });
+
+	hexOutput.setAttribute("tabindex", "0");
+	hexOutput.addEventListener("keydown", handleKeyDown);
+
+	document.addEventListener("DOMContentLoaded", () => {
+		setTimeout(() => {
+			updateChunkSize();
+		}, 100);
+	});
+
+	const throttledResize = throttle(() => {
+		if (currentFile) {
+			const oldChunkSize = CHUNK_SIZE;
+			updateChunkSize();
+			
+			if (CHUNK_SIZE !== oldChunkSize) {
+				lastUpdateOffset = -1;
+				updateDisplay();
+			}
+		}
+	}, 250);
+
+	window.addEventListener("resize", throttledResize as EventListener);
+
+	function handleOffsetClick(): void {
+		if (!currentFile || isSearching) return;
+
+		const input = prompt(
+			"Jump to offset (hexadecimal, e.g., 1000 or 0x1000):",
+			"0x" + currentOffset.toString(16).toUpperCase(),
+		);
+
+		if (input === null) return;
+
+		let targetOffset: number;
+		try {
+			const cleanInput = input.trim().toLowerCase();
+			if (cleanInput.startsWith("0x")) {
+				targetOffset = parseInt(cleanInput, 16);
+			} else {
+				targetOffset = parseInt(cleanInput, 16);
+			}
+
+			if (isNaN(targetOffset) || targetOffset < 0) {
+				alert("Invalid offset value. Please enter a valid hexadecimal number.");
+				return;
+			}
+
+			const maxOffset = getMaxOffset();
+			targetOffset = Math.min(targetOffset, maxOffset);
+
+			targetOffset = Math.floor(targetOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+			currentOffset = targetOffset;
+			lastUpdateOffset = -1;
+			updateDisplay();
+		} catch (error) {
+			alert("Invalid offset value. Please enter a valid hexadecimal number.");
+		}
+	}
+
+	offsetInfo.addEventListener("click", handleOffsetClick);
+
+	function handleCanvasClick(event: MouseEvent): void {
+		if (!currentFile || isSearching) return;
+
+		const rect = canvas.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+
+		const canvasX = Math.floor(x);
+		const canvasY = Math.floor(y);
+
+		if (canvasX < 0 || canvasX >= canvas.width || canvasY < 0 || canvasY >= canvas.height) {
+			return;
+		}
+
+		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
+		const byteIndex = canvasY * bytesPerCanvasLine + canvasX;
+
+		const fileByteOffset = currentOffset + byteIndex;
+
+		if (fileByteOffset >= totalFileSize) {
+			return;
+		}
+
+		const targetOffset = Math.floor(fileByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+
+		if (clampedOffset !== currentOffset) {
+			currentOffset = clampedOffset;
+			lastUpdateOffset = -1;
+			updateDisplay();
+		}
+	}
+
+	canvas.addEventListener("click", handleCanvasClick);
+
+	function handleDragEnter(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter++;
+		if (dragCounter === 1) {
+			dragOverlay.classList.remove("hidden");
+		}
+	}
+
+	function handleDragOver(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		event.dataTransfer!.dropEffect = "copy";
+	}
+
+	function handleDragLeave(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter--;
+		if (dragCounter === 0) {
+			dragOverlay.classList.add("hidden");
+		}
+	}
+
+	function handleDrop(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter = 0;
+		dragOverlay.classList.add("hidden");
+
+		const files = event.dataTransfer?.files;
+		if (files && files.length > 0) {
+			const file = files[0];
+			loadFile(file);
+		}
+	}
+
+	document.addEventListener("dragenter", handleDragEnter);
+	document.addEventListener("dragover", handleDragOver);
+	document.addEventListener("dragleave", handleDragLeave);
+	document.addEventListener("drop", handleDrop);
+
+	function getCurrentSearchMode(): 'ascii' | 'hex' {
+		const checkedInput = document.querySelector('input[name="search-mode"]:checked') as HTMLInputElement;
+		return checkedInput?.value as 'ascii' | 'hex' || 'ascii';
+	}
+
+	function updateSearchPlaceholder(): void {
+		const mode = getCurrentSearchMode();
+		if (mode === 'ascii') {
+			searchInput.placeholder = 'Enter ASCII text (e.g., "Hello World")';
+		} else {
+			searchInput.placeholder = 'Enter hex bytes (e.g., "48 65 6C 6C 6F")';
+		}
+	}
+
+	function validateSearchInput(input: string, mode: 'ascii' | 'hex'): boolean {
+		if (!input.trim()) {
+			return false;
+		}
+
+		if (mode === 'ascii') {
+			return true;
+		} else {
+			const hexPattern = /^[0-9A-Fa-f\s]+$/;
+			if (!hexPattern.test(input)) {
+				return false;
+			}
+			
+			const bytes = input.trim().split(/\s+/);
+			return bytes.every(byte => {
+				const parsed = parseInt(byte, 16);
+				return !isNaN(parsed) && parsed >= 0 && parsed <= 255;
+			});
+		}
+	}
+
+	function convertToBytePattern(input: string, mode: 'ascii' | 'hex'): Uint8Array | null {
+		if (!input.trim()) {
+			return null;
+		}
+
+		try {
+			if (mode === 'ascii') {
+				return new TextEncoder().encode(input);
+			} else {
+				const bytes = input.trim().split(/\s+/).map(byte => parseInt(byte, 16));
+				return new Uint8Array(bytes);
+			}
+		} catch (error) {
+			console.error('Pattern conversion error:', error);
+			return null;
+		}
+	}
+
+	function updateSearchButtonState(): void {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		const isValid = validateSearchInput(input, mode);
+		
+		if (isValid) {
+			searchInput.classList.remove('invalid');
+			searchToggleBtn.disabled = !currentFile;
+		} else {
+			searchInput.classList.add('invalid');
+			searchToggleBtn.disabled = true;
+		}
+		
+		if (isSearching) {
+			searchBtnText.textContent = 'Stop';
+			searchToggleBtn.className = 'btn btn-secondary';
+		} else {
+			searchBtnText.textContent = 'Search';
+			searchToggleBtn.className = 'btn btn-primary';
+		}
+		
+		if (isSearching) {
+			customScrollbar.classList.add('disabled');
+			fileInput.disabled = true;
+		} else {
+			customScrollbar.classList.remove('disabled');
+			fileInput.disabled = false;
+		}
+	}
+
+	searchInput.addEventListener('input', updateSearchButtonState);
+
+	searchModeInputs.forEach(input => {
+		input.addEventListener('change', () => {
+			updateSearchPlaceholder();
+			updateSearchButtonState();
+		});
+	});
+
+	updateSearchPlaceholder();
+	updateSearchButtonState();
+
+	function initializeSearchWorker(): void {
+		if (!searchWorker) {
+			const workerScript = new URL('./_search-worker.js', import.meta.url);
+			searchWorker = new Worker(workerScript, { type: 'module' });
+			searchWorker.onmessage = handleWorkerMessage;
+			searchWorker.onerror = (error) => {
+				console.error('HexDump search worker error:', error);
+				statusMessage.textContent = 'Search worker error occurred';
+				statusMessage.classList.add('error');
+				isSearching = false;
+				updateSearchButtonState();
+			};
+		}
+	}
+
+	function handleWorkerMessage(event: MessageEvent): void {
+		const data = event.data;
+		const type = data.type;
+		
+		switch (type) {
+			case 'progress':
+				const remainingSeconds = Math.ceil(data.estimatedRemainingMs / 1000);
+				let timeText = '';
+				
+				if (remainingSeconds < 60) {
+					timeText = `~${remainingSeconds}s`;
+				} else if (remainingSeconds < 3600) {
+					const minutes = Math.ceil(remainingSeconds / 60);
+					timeText = `~${minutes}m`;
+				} else {
+					const hours = Math.floor(remainingSeconds / 3600);
+					const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+					timeText = `~${hours}h${minutes}m`;
+				}
+				
+				statusMessage.textContent = `Searching... ${data.progress.toFixed(1)}% (${timeText} remaining)`;
+				break;
+				
+			case 'found':
+				searchResultOffset = data.offset;
+				statusMessage.textContent = `Found at offset 0x${data.offset.toString(16).toUpperCase()}`;
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('success');
+				
+				jumpToOffset(data.offset);
+				
+				isSearching = false;
+				updateSearchButtonState();
+				
+				setTimeout(() => {
+					statusMessage.textContent = 'Ready';
+					statusMessage.classList.remove('success', 'warning', 'error');
+				}, 3000);
+				break;
+				
+			case 'not_found':
+				statusMessage.textContent = 'Pattern not found';
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('warning');
+				finishSearch();
+				break;
+				
+			case 'cancelled':
+				statusMessage.textContent = 'Search cancelled';
+				statusMessage.classList.remove('loading');
+				finishSearch();
+				break;
+				
+			default:
+				console.warn('Unknown worker message type:', type);
+		}
+	}
+
+	function finishSearch(): void {
+		isSearching = false;
+		updateSearchButtonState();
+		
+		setTimeout(() => {
+			statusMessage.textContent = 'Ready';
+			statusMessage.classList.remove('success', 'warning', 'error');
+		}, 3000);
+	}
+
+	initializeSearchWorker();
+
+	async function executeSearch(): Promise<void> {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		
+		if (!input || !currentFile || !searchWorker) {
+			return;
+		}
+
+		const pattern = convertToBytePattern(input, mode);
+		if (!pattern) {
+			statusMessage.textContent = 'Invalid search pattern';
+			statusMessage.classList.add('error');
+			setTimeout(() => {
+				statusMessage.textContent = 'Ready';
+				statusMessage.classList.remove('error');
+			}, 3000);
+			return;
+		}
+
+		searchResultOffset = -1;
+		
+		isSearching = true;
+		searchPattern = pattern;
+		
+		updateSearchButtonState();
+		statusMessage.textContent = 'Searching...';
+		statusMessage.classList.add('loading');
+		
+		updateDisplay();
+
+		searchWorker.postMessage({
+			type: 'search',
+			data: {
+				file: currentFile,
+				pattern: Array.from(pattern),
+				startOffset: currentOffset,
+				chunkSize: 4 * 1024 * 1024
+			}
+		});
+	}
+
+	function stopSearch(): void {
+		if (searchWorker && isSearching) {
+			searchWorker.postMessage({
+				type: 'cancel'
+			});
+		}
+	}
+
+	function jumpToOffset(targetOffset: number): void {
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+		const alignedOffset = Math.floor(clampedOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		currentOffset = alignedOffset;
+		lastUpdateOffset = -1;
+		updateDisplay();
+	}
+
+	searchToggleBtn.addEventListener('click', () => {
+		if (isSearching) {
+			stopSearch();
+		} else {
+			executeSearch();
+		}
+	});
+
+	searchInput.addEventListener('keydown', (event) => {
+		if (event.key === 'Enter' && !searchToggleBtn.disabled) {
+			if (isSearching) {
+				stopSearch();
+			} else {
+				executeSearch();
+			}
+		}
+	});
+
+</script>
+
+<style>
+	.viewer-grid {
+		display: grid;
+		grid-template-columns: 1fr 300px;
+		gap: 1.5rem;
+		margin-top: 1.5rem;
+	}
+
+	.hex-output-container {
+		height: calc(100vh - 400px);
+		max-height: 800px;
+		min-height: 400px;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.hex-display-wrapper {
+		flex: 1;
+		display: flex;
+		margin-top: 1rem;
+		gap: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.hex-output {
+		flex: 1;
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
+		line-height: 1.4;
+		color: var(--text-primary);
+		white-space: pre;
+		padding: 1rem;
+		background: var(--bg-tertiary);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-primary);
+		overflow: hidden;
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
+		border-right: none;
+		min-height: 200px;
+	}
+
+	.custom-scrollbar {
+		width: 12px;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-left: none;
+		border-top-right-radius: var(--radius-md);
+		border-bottom-right-radius: var(--radius-md);
+		position: relative;
+		height: 100%;
+	}
+
+	.custom-scrollbar.hidden {
+		display: none;
+	}
+
+	.custom-scrollbar.disabled {
+		opacity: 0.5;
+		pointer-events: none;
+	}
+
+	.scrollbar-track {
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		right: 2px;
+		bottom: 2px;
+		background: var(--bg-secondary);
+		border-radius: 4px;
+		cursor: pointer;
+	}
+
+	.scrollbar-thumb {
+		position: absolute;
+		left: 0;
+		right: 0;
+		background: var(--text-muted);
+		border-radius: 4px;
+		cursor: pointer;
+		transition: background-color 0.2s ease;
+		min-height: 20px;
+		opacity: 0.8;
+	}
+
+	.scrollbar-thumb:hover {
+		background: var(--text-secondary);
+		opacity: 1;
+	}
+
+	.scrollbar-thumb.dragging {
+		background: var(--accent-primary);
+		opacity: 1;
+	}
+
+	.scroll-info {
+		display: flex;
+		justify-content: space-between;
+		margin-top: 0.5rem;
+		padding: 0.5rem 0;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		flex-shrink: 0;
+		border-top: 1px solid var(--border-secondary);
+	}
+
+	#offset-info {
+		cursor: pointer;
+		padding: 0.25rem 0.5rem;
+		border-radius: var(--radius-sm);
+		transition: all 0.2s ease;
+	}
+
+	#offset-info:hover {
+		background: var(--bg-card);
+		color: var(--accent-primary);
+		transform: translateY(-1px);
+	}
+
+	.canvas-container {
+		display: flex;
+		flex-direction: column;
+		max-height: 800px;
+	}
+
+	#hex-canvas {
+		border: 1px solid var(--border-primary);
+		image-rendering: pixelated;
+		background: var(--bg-tertiary);
+		box-shadow: var(--shadow-md);
+		transition: box-shadow 0.2s ease;
+		cursor: pointer;
+	}
+
+	#hex-canvas:hover {
+		box-shadow: var(--shadow-lg), 0 0 10px rgba(59, 130, 246, 0.3);
+		border-color: var(--accent-primary);
+	}
+
+	.color-legend {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 0.5rem;
+		width: 100%;
+		max-width: 256px;
+	}
+
+	.legend-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+	}
+
+	.color-sample {
+		width: 12px;
+		height: 12px;
+		border-radius: 2px;
+		flex-shrink: 0;
+	}
+
+	.format-info {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+	}
+
+	.canvas-wrapper {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 1rem;
+	}
+
+	.hex-output:empty::before {
+		content: "Select a file to view its hex dump...";
+		color: var(--text-muted);
+		font-style: italic;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+	}
+
+	@keyframes canvasLoad {
+		0% {
+			opacity: 0;
+			transform: scale(0.9);
+		}
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	#hex-canvas.loaded {
+		animation: canvasLoad 0.3s ease-out;
+	}
+
+	.glass-card:hover {
+		transform: translateY(-2px);
+	}
+
+	.result-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0;
+		padding-bottom: 0;
+	}
+
+	.result-header h3 {
+		margin: 0;
+		font-size: 1.1rem;
+	}
+
+	.search-panel {
+		margin-bottom: 1.5rem;
+	}
+
+	.search-controls {
+		display: flex;
+		gap: 1rem;
+		align-items: flex-end;
+	}
+
+	.search-input-group {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.search-input {
+		width: 100%;
+		padding: 0.5rem 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		color: var(--text-primary);
+		font-size: 0.875rem;
+		font-family: var(--font-mono);
+		transition: all 0.2s ease;
+	}
+
+	.search-input:focus {
+		outline: none;
+		border-color: var(--accent-primary);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+	}
+
+	.search-input.invalid {
+		border-color: var(--accent-error);
+		box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+	}
+
+	.search-mode {
+		display: flex;
+		gap: 1rem;
+	}
+
+	.search-mode-option {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		cursor: pointer;
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		transition: color 0.2s ease;
+	}
+
+	.search-mode-option:hover {
+		color: var(--text-primary);
+	}
+
+	.search-mode-option input[type="radio"] {
+		width: 0.875rem;
+		height: 0.875rem;
+		appearance: none;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: 50%;
+		position: relative;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.search-mode-option input[type="radio"]:checked {
+		background: var(--accent-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.search-mode-option input[type="radio"]:checked::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 5px;
+		height: 5px;
+		background: white;
+		border-radius: 50%;
+	}
+
+	.drag-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100vw;
+		height: 100vh;
+		background: rgba(59, 130, 246, 0.1);
+		backdrop-filter: blur(5px);
+		z-index: 9999;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+		transition: opacity 0.2s ease;
+	}
+
+	.drag-overlay.hidden {
+		opacity: 0;
+		pointer-events: none;
+		display: none;
+	}
+
+	.drag-message {
+		background: var(--bg-card);
+		border: 2px dashed var(--accent-primary);
+		border-radius: var(--radius-lg);
+		padding: 3rem;
+		text-align: center;
+		box-shadow: var(--shadow-xl);
+		transform: scale(0.9);
+		animation: dragPulse 1.5s ease-in-out infinite;
+	}
+
+	.drag-icon {
+		font-size: 4rem;
+		margin-bottom: 1rem;
+		opacity: 0.8;
+	}
+
+	.drag-text {
+		font-size: 1.5rem;
+		font-weight: 600;
+		color: var(--accent-primary);
+		margin: 0;
+	}
+
+	@keyframes dragPulse {
+		0%, 100% {
+			transform: scale(0.9);
+			opacity: 0.8;
+		}
+		50% {
+			transform: scale(1);
+			opacity: 1;
+		}
+	}
+</style>
+
+<script>
+	const fileInput = document.getElementById("file-input") as HTMLInputElement;
+	const fileName = document.getElementById("file-input-name") as HTMLSpanElement;
+	const fileSize = document.getElementById("file-input-size") as HTMLSpanElement;
+	const hexOutput = document.getElementById("hex-output") as HTMLDivElement;
+	const canvas = document.getElementById("hex-canvas") as HTMLCanvasElement;
+	const ctx = canvas.getContext("2d", { willReadFrequently: false })!;
+
+	// Canvas描画の最適化設定
+	ctx.imageSmoothingEnabled = false;
+	const customScrollbar = document.getElementById(
+		"custom-scrollbar",
+	) as HTMLDivElement;
+	const scrollbarTrack = document.getElementById(
+		"scrollbar-track",
+	) as HTMLDivElement;
+	const scrollbarThumb = document.getElementById(
+		"scrollbar-thumb",
+	) as HTMLDivElement;
+	const scrollPosition = document.getElementById(
+		"scroll-position",
+	) as HTMLSpanElement;
+	const offsetInfo = document.getElementById(
+		"offset-info",
+	) as HTMLSpanElement;
+	const statusMessage = document.getElementById(
+		"status-message",
+	) as HTMLSpanElement;
+	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
+	
+	
+	// 検索関連の要素
+	const searchInput = document.getElementById("search-input") as HTMLInputElement;
+	const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
+	const searchBtnText = document.getElementById("search-btn-text") as HTMLSpanElement;
+	const searchModeInputs = document.querySelectorAll('input[name="search-mode"]') as NodeListOf<HTMLInputElement>;
+
+	let currentFile: File | null = null;
+	let totalFileSize = 0;
+	let currentOffset = 0;
+	let isDragging = false;
+	let dragStartY = 0;
+	let dragStartOffset = 0;
+	let isLoading = false;
+	let lastUpdateOffset = -1;
+	let dragCounter = 0; // ドラッグイベントの重複防止
+	
+	// Canvas専用の状態変数
+	let canvasCurrentOffset = 0;
+	let lastCanvasUpdateOffset = -1;
+	
+	// 双方向同期制御用フラグ
+	let isSyncingToCanvas = false;
+	let isSyncingToHexDump = false;
+	
+	// 検索関連の状態変数
+	let isSearching = false;
+	let searchResultOffset = -1;
+	let searchPattern: Uint8Array | null = null;
+	let searchWorker: Worker | null = null;
+	
+	const BYTES_PER_LINE = 16;
+	const CANVAS_BYTES_PER_LINE = 256;
+	let LINES_TO_DISPLAY = 50; // 動的に変更される
+	let CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE; // 表示用チャンクサイズ
+	
+	// Canvas専用の設定
+	let CANVAS_LINES_TO_DISPLAY = 400; // Canvas表示行数（ピクセル高に対応）
+	let CANVAS_CHUNK_SIZE = CANVAS_LINES_TO_DISPLAY * CANVAS_BYTES_PER_LINE; // Canvas用チャンクサイズ
+	
+	const MIN_THUMB_HEIGHT = 20; // 最小サムの高さ（px）
+	const MIN_LINES = 10; // 最小表示行数
+	const MAX_LINES = 100; // 最大表示行数
+
+	function throttle(func: Function, delay: number): Function {
+		let timeoutId: number | null | NodeJS.Timeout = null;
+		let lastExecTime = 0;
+		return function (...args: any[]) {
+			const currentTime = Date.now();
+			if (currentTime - lastExecTime > delay) {
+				func(...args);
+				lastExecTime = currentTime;
+			} else if (!timeoutId) {
+				timeoutId = setTimeout(
+					() => {
+						func(...args);
+						lastExecTime = Date.now();
+						timeoutId = null;
+					},
+					delay - (currentTime - lastExecTime),
+				);
+			}
+		};
+	}
+
+	function calculateVisibleLines(): number {
+		try {
+			// hex-display-wrapper要素の実際の高さを取得
+			const wrapper = document.querySelector('.hex-display-wrapper') as HTMLElement;
+			if (!wrapper) {
+				return 35; // デフォルト値
+			}
+
+			const wrapperHeight = wrapper.clientHeight;
+			if (wrapperHeight === 0) {
+				return 35; // デフォルト値
+			}
+
+			// hex-output要素のパディングを考慮
+			const padding = 32; // 1rem × 2 (top/bottom padding)
+			const availableHeight = wrapperHeight - padding;
+
+			// 1行の高さを計算（font-size: 0.8rem, line-height: 1.4）
+			const fontSize = 0.8 * 16; // 0.8rem → px
+			const lineHeight = fontSize * 1.4; // line-height: 1.4
+
+			// 表示可能な行数を計算
+			const visibleLines = Math.floor(availableHeight / lineHeight);
+
+			console.log(`Wrapper height: ${wrapperHeight}px, Available height: ${availableHeight}px, Lines: ${visibleLines}`);
+
+			// 最小値と最大値の範囲内に制限
+			return Math.max(MIN_LINES, Math.min(MAX_LINES, visibleLines));
+		} catch (error) {
+			console.warn("Failed to calculate visible lines:", error);
+			return 35; // エラー時のデフォルト値
+		}
+	}
+
+	function updateChunkSize(): void {
+		LINES_TO_DISPLAY = calculateVisibleLines();
+		CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE;
+		console.log(
+			`Updated display lines: ${LINES_TO_DISPLAY}, chunk size: ${CHUNK_SIZE}`,
+		);
+	}
+
+	// 双方向同期用のオフセット変換関数
+	function hexDumpOffsetToCanvasOffset(hexOffset: number): number {
+		// HexDumpオフセット（16バイト境界）をCanvas中心位置（256バイト境界）に変換
+		// Canvasの中央にHexDumpの位置が来るように調整
+		const canvasHalfHeight = CANVAS_LINES_TO_DISPLAY / 2;
+		const targetCanvasLine = Math.floor(hexOffset / CANVAS_BYTES_PER_LINE);
+		const centeredCanvasOffset = Math.max(0, (targetCanvasLine - canvasHalfHeight)) * CANVAS_BYTES_PER_LINE;
+		return Math.floor(centeredCanvasOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+	}
+
+	function canvasOffsetToHexDumpOffset(canvasOffset: number): number {
+		// CanvasオフセットをHexDumpオフセット（16バイト境界）に変換
+		// Canvasの先頭行に対応するHexDumpオフセット
+		return Math.floor(canvasOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+	}
+
+
+	function formatFileSize(bytes: number): string {
+		if (bytes === 0) return "0 Bytes";
+		const k = 1024;
+		const sizes = ["Bytes", "KB", "MB", "GB"];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+	}
+
+	// パフォーマンス向上のための16進数変換テーブル
+	// 0x00-0xFF (0-255) の全てのバイト値を事前に16進数文字列に変換
+	const HEX_TABLE = Array.from({ length: 256 }, (_, i) => 
+		i.toString(16).padStart(2, "0").toUpperCase()
+	);
+
+	// HTML参照文字化テーブル（セキュリティ強化）
+	// HTMLインジェクション攻撃を防ぐため、特殊文字を参照文字でエスケープ
+	const CHAR_TABLE = (() => {
+		const table = new Array(256);
+		for (let i = 0; i < 256; i++) {
+			if (i >= 0x20 && i <= 0x7e) {
+				// 印字可能ASCII文字だが、HTMLの特殊文字はエスケープ
+				switch (i) {
+					case 0x3C: // < (less than)
+						table[i] = "&lt;";
+						break;
+					case 0x3E: // > (greater than)
+						table[i] = "&gt;";
+						break;
+					case 0x26: // & (ampersand)
+						table[i] = "&amp;";
+						break;
+					case 0x22: // " (double quote)
+						table[i] = "&quot;";
+						break;
+					case 0x27: // ' (single quote)
+						table[i] = "&#x27;";
+						break;
+					default:
+						table[i] = String.fromCharCode(i);
+				}
+			} else {
+				// 非印字文字は全て . (dot) で表示
+				table[i] = ".";
+			}
+		}
+		return table;
+	})();
+
+	function byteToHex(byte: number): string {
+		return HEX_TABLE[byte];
+	}
+
+	function byteToChar(byte: number): string {
+		return CHAR_TABLE[byte];
+	}
+
+
+	function getByteColorRGB(byte: number): {
+		r: number;
+		g: number;
+		b: number;
+	} {
+		if (byte === 0x00) return { r: 255, g: 255, b: 255 }; // 白
+		if (byte >= 0x01 && byte <= 0x1f) return { r: 0, g: 255, b: 255 }; // 水色
+		if (byte >= 0x20 && byte <= 0x7e) return { r: 255, g: 0, b: 0 }; // 赤
+		return { r: 0, g: 0, b: 0 }; // 黒
+	}
+
+
+	async function loadChunk(
+		offset: number,
+		size: number,
+	): Promise<ArrayBuffer | null> {
+		if (!currentFile) return null;
+
+		const start = Math.max(0, offset);
+		const end = Math.min(currentFile.size, offset + size);
+
+		if (start >= end) return null;
+
+		try {
+			const slice = currentFile.slice(start, end);
+			return await slice.arrayBuffer();
+		} catch (error) {
+			console.error("Error loading chunk:", error);
+			return null;
+		}
+	}
+
+	function updateScrollInfo(percentage: number, offset: number): void {
+		scrollPosition.textContent = `${percentage.toFixed(1)}%`;
+		offsetInfo.textContent = `Offset: 0x${offset.toString(16).padStart(8, "0").toUpperCase()}`;
+	}
+
+	function getMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
+			return 0;
+		}
+		
+		// ファイルの最後のバイトが含まれる行の開始オフセット
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+	function calculateScrollbarDimensions(): {
+		thumbHeight: number;
+		thumbPosition: number;
+		visible: boolean;
+	} {
+		if (!totalFileSize || totalFileSize <= CHUNK_SIZE) {
+			return { thumbHeight: 0, thumbPosition: 0, visible: false };
+		}
+
+		const trackHeight = scrollbarTrack.clientHeight;
+		const visibleRatio = CHUNK_SIZE / totalFileSize;
+		const thumbHeight = Math.max(
+			MIN_THUMB_HEIGHT,
+			trackHeight * visibleRatio,
+		);
+
+		const maxOffset = getMaxOffset();
+		const scrollProgress = maxOffset > 0 ? currentOffset / maxOffset : 0;
+		const maxThumbPosition = trackHeight - thumbHeight;
+		const thumbPosition = scrollProgress * maxThumbPosition;
+
+		return { thumbHeight, thumbPosition, visible: true };
+	}
+
+	// Canvas専用のスクロール関数群
+	function getCanvasMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CANVAS_CHUNK_SIZE) {
+			return 0;
+		}
+		
+		// Canvasの最後のバイトが含まれる行の開始オフセット
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+
+
+	async function updateCanvasDisplay(): Promise<void> {
+		if (!currentFile || lastCanvasUpdateOffset === canvasCurrentOffset) {
+			return;
+		}
+
+		lastCanvasUpdateOffset = canvasCurrentOffset;
+
+		try {
+			// Canvas用のチャンクを読み込み（HexDump表示とは独立）
+			const canvasBuffer = await loadChunk(
+				canvasCurrentOffset,
+				CANVAS_CHUNK_SIZE,
+			);
+			if (canvasBuffer) {
+				drawCanvas(canvasBuffer);
+				canvas.classList.add("loaded");
+			}
+
+			
+			// CanvasからHexDumpへの同期（無限ループ防止）
+			if (!isSyncingToCanvas) {
+				isSyncingToHexDump = true;
+				const newHexDumpOffset = canvasOffsetToHexDumpOffset(canvasCurrentOffset);
+				if (newHexDumpOffset !== currentOffset) {
+					currentOffset = newHexDumpOffset;
+					await updateDisplay();
+				}
+				isSyncingToHexDump = false;
+			}
+
+		} catch (error) {
+			console.error("Error updating canvas display:", error);
+		}
+	}
+
+	// Canvas表示更新のthrottled版（同期時の負荷軽減）
+	const throttledUpdateCanvasDisplay = throttle(updateCanvasDisplay, 100);
+
+	function updateScrollbarAppearance(): void {
+		const { thumbHeight, thumbPosition, visible } =
+			calculateScrollbarDimensions();
+
+		if (visible) {
+			customScrollbar.classList.remove("hidden");
+			scrollbarThumb.style.height = `${thumbHeight}px`;
+			scrollbarThumb.style.top = `${thumbPosition}px`;
+		} else {
+			customScrollbar.classList.add("hidden");
+		}
+	}
+
+
+	function generateHexDump(buffer: ArrayBuffer, fileOffset: number): string {
+		const bytes = new Uint8Array(buffer);
+		let output = "";
+		for (let i = 0; i < bytes.length; i += BYTES_PER_LINE) {
+			const actualOffset = fileOffset + i;
+			const lineOffset = actualOffset
+				.toString(16)
+				.padStart(8, "0")
+				.toUpperCase();
+			let hexPart = "";
+			let textPart = "";
+
+			for (let j = 0; j < BYTES_PER_LINE; j++) {
+				const byteIndex = i + j;
+				const currentByteOffset = fileOffset + byteIndex;
+				
+				if (byteIndex < bytes.length) {
+					const byte = bytes[byteIndex];
+					let hexByte = byteToHex(byte);
+					let textByte = byteToChar(byte);
+					
+					// 検索結果のハイライト処理
+					if (searchResultOffset !== -1 && searchPattern) {
+						const searchEnd = searchResultOffset + searchPattern.length - 1;
+						if (currentByteOffset >= searchResultOffset && currentByteOffset <= searchEnd) {
+							hexByte = `<span class="search-highlight">${hexByte}</span>`;
+							// textByteは既にHTML参照文字化済みなので、そのままハイライト
+							textByte = `<span class="search-highlight">${textByte}</span>`;
+						}
+					}
+					
+					hexPart += hexByte + " ";
+					textPart += textByte;
+				} else {
+					hexPart += "   ";
+					textPart += " ";
+				}
+			}
+
+			output += `${lineOffset}: ${hexPart} |${textPart}|\n`;
+		}
+
+		return output;
+	}
+
+	function drawCanvas(buffer: ArrayBuffer): void {
+		const bytes = new Uint8Array(buffer);
+		const canvasWidth = canvas.width;
+		const canvasHeight = canvas.height;
+
+		// ImageDataを使用した最適化された描画
+		const imageData = ctx.createImageData(canvasWidth, canvasHeight);
+		const data = imageData.data;
+
+		// 背景を黒で初期化（データがない部分）
+		for (let i = 0; i < data.length; i += 4) {
+			data[i] = 0; // Red
+			data[i + 1] = 0; // Green
+			data[i + 2] = 0; // Blue
+			data[i + 3] = 255; // Alpha
+		}
+
+		// バイトデータを色情報に変換
+		const totalPixels = canvasWidth * canvasHeight;
+		const bytesToProcess = Math.min(bytes.length, totalPixels);
+
+		for (let i = 0; i < bytesToProcess; i++) {
+			const byte = bytes[i];
+			const color = getByteColorRGB(byte);
+			const pixelIndex = i * 4;
+
+			data[pixelIndex] = color.r; // Red
+			data[pixelIndex + 1] = color.g; // Green
+			data[pixelIndex + 2] = color.b; // Blue
+			data[pixelIndex + 3] = 255; // Alpha
+		}
+
+		// 一度に全体を描画
+		ctx.putImageData(imageData, 0, 0);
+	}
+
+	function setLoadingState(
+		loading: boolean,
+		message: string = "Ready",
+	): void {
+		isLoading = loading;
+		if (loading) {
+			statusMessage.textContent = message;
+			statusMessage.classList.add("loading");
+		} else {
+			statusMessage.textContent = "Ready";
+			statusMessage.classList.remove("loading");
+		}
+	}
+
+	async function updateDisplay(): Promise<void> {
+		if (!currentFile || isLoading) return;
+
+		// キャッシュチェック：同じオフセットの場合はスキップ
+		if (lastUpdateOffset === currentOffset) return;
+
+		setLoadingState(true, "Loading file data...");
+		lastUpdateOffset = currentOffset;
+
+		try {
+			// Hexdump用のチャンクを読み込み（ファイル終端を考慮）
+			const remainingBytes = totalFileSize - currentOffset;
+			const readSize = Math.min(CHUNK_SIZE, remainingBytes);
+			const hexBuffer = await loadChunk(currentOffset, readSize);
+			if (hexBuffer) {
+				const hexDump = generateHexDump(hexBuffer, currentOffset);
+				hexOutput.innerHTML = hexDump; // HTMLとして表示
+			}
+
+			// スクロール情報を更新
+			const maxOffset = getMaxOffset();
+			const percentage = maxOffset > 0 ? (currentOffset / maxOffset) * 100 : 0;
+			updateScrollInfo(Math.min(percentage, 100), currentOffset);
+			updateScrollbarAppearance();
+			
+			
+			// HexDumpからCanvasへの同期（無限ループ防止）
+			if (!isSyncingToHexDump) {
+				isSyncingToCanvas = true;
+				const newCanvasOffset = hexDumpOffsetToCanvasOffset(currentOffset);
+				if (newCanvasOffset !== canvasCurrentOffset) {
+					canvasCurrentOffset = newCanvasOffset;
+					await updateCanvasDisplay();
+				}
+				isSyncingToCanvas = false;
+			}
+		} catch (error) {
+			console.error("Error updating display:", error);
+			setLoadingState(false, "Error loading file");
+		} finally {
+			setLoadingState(false);
+		}
+	}
+
+	function handleThumbMouseDown(event: MouseEvent): void {
+		if (!currentFile || isSearching) return;
+
+		isDragging = true;
+		dragStartY = event.clientY;
+		dragStartOffset = currentOffset;
+
+		scrollbarThumb.classList.add("dragging");
+		document.addEventListener("mousemove", handleThumbMouseMove);
+		document.addEventListener("mouseup", handleThumbMouseUp);
+
+		event.preventDefault();
+	}
+
+	const throttledUpdateDisplay = throttle(updateDisplay, 16); // 60FPS相当
+
+	function handleThumbMouseMove(event: MouseEvent): void {
+		if (!isDragging || !currentFile || isSearching) return;
+
+		const deltaY = event.clientY - dragStartY;
+		const trackHeight = scrollbarTrack.clientHeight;
+		const { thumbHeight } = calculateScrollbarDimensions();
+		const maxThumbPosition = trackHeight - thumbHeight;
+
+		if (maxThumbPosition <= 0) return;
+
+		const scrollRatio = deltaY / maxThumbPosition;
+		const maxOffset = getMaxOffset();
+		const newOffset = dragStartOffset + scrollRatio * maxOffset;
+
+		currentOffset = Math.max(0, Math.min(maxOffset, newOffset));
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		throttledUpdateDisplay();
+	}
+
+	function handleThumbMouseUp(): void {
+		if (!isDragging) return;
+
+		isDragging = false;
+		scrollbarThumb.classList.remove("dragging");
+		document.removeEventListener("mousemove", handleThumbMouseMove);
+		document.removeEventListener("mouseup", handleThumbMouseUp);
+	}
+
+	function handleTrackClick(event: MouseEvent): void {
+		if (!currentFile || event.target === scrollbarThumb || isSearching) return;
+
+		const rect = scrollbarTrack.getBoundingClientRect();
+		const clickY = event.clientY - rect.top;
+		const trackHeight = scrollbarTrack.clientHeight;
+		const { thumbHeight } = calculateScrollbarDimensions();
+		const maxThumbPosition = trackHeight - thumbHeight;
+
+		if (maxThumbPosition <= 0) return;
+
+		const scrollRatio = Math.max(0, Math.min(1, clickY / trackHeight));
+		const maxOffset = getMaxOffset();
+		currentOffset =
+			Math.floor((scrollRatio * maxOffset) / BYTES_PER_LINE) *
+			BYTES_PER_LINE;
+
+		updateDisplay(); // クリック時は即座に更新
+	}
+
+
+	function handleCanvasWheelScroll(event: WheelEvent): void {
+		if (!currentFile || isSearching) return;
+
+		event.preventDefault();
+
+		// Canvas用は画面の約1/3をスクロール（大幅な高速スクロール）
+		const pageScrollLines = Math.floor(CANVAS_LINES_TO_DISPLAY / 3); // 約133行
+		const scrollAmount = pageScrollLines * CANVAS_BYTES_PER_LINE; // 約34,048バイト
+		const maxOffset = getCanvasMaxOffset();
+
+		if (event.deltaY > 0) {
+			// 下スクロール
+			canvasCurrentOffset = Math.min(maxOffset, canvasCurrentOffset + scrollAmount);
+		} else {
+			// 上スクロール
+			canvasCurrentOffset = Math.max(0, canvasCurrentOffset - scrollAmount);
+		}
+
+		// 行境界に調整
+		canvasCurrentOffset = Math.floor(canvasCurrentOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		throttledUpdateCanvasDisplay();
+	}
+
+	// ファイル選択をクリア
+	function clearFileSelection(): void {
+		currentFile = null;
+		totalFileSize = 0;
+		currentOffset = 0;
+		lastUpdateOffset = -1; // キャッシュリセット
+		
+		// Canvas状態もリセット
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
+		
+		customScrollbar.classList.add("hidden");
+		hexOutput.textContent = "";
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		updateScrollInfo(0, 0);
+		setLoadingState(false, "Ready");
+		
+		// 検索結果をクリア
+		searchResultOffset = -1;
+		searchPattern = null;
+		
+		// 検索ボタンの状態を更新
+		updateSearchButtonState();
+	}
+
+	// ファイル読み込み処理（共通）
+	async function loadFile(file: File): Promise<void> {
+		currentFile = file;
+		totalFileSize = file.size;
+		currentOffset = 0;
+		lastUpdateOffset = -1; // キャッシュリセット
+		
+		// Canvas状態も初期化
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
+
+		fileName.textContent = file.name;
+		fileSize.textContent = formatFileSize(file.size);
+
+		// 表示行数を動的に計算して更新
+		updateChunkSize();
+		
+		// 検索ボタンの状態を更新
+		updateSearchButtonState();
+		
+		// 検索結果をクリア
+		searchResultOffset = -1;
+		searchPattern = null;
+
+		try {
+			await updateDisplay();
+			await updateCanvasDisplay();
+		} catch (error) {
+			console.error("Error reading file:", error);
+			setLoadingState(false, "Error loading file");
+		}
+	}
+
+	async function handleFileChange(event: Event): Promise<void> {
+		if (isSearching) return;
+		
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+
+		if (!file) {
+			clearFileSelection();
+			return;
+		}
+
+		await loadFile(file);
+	}
+
+	fileInput.addEventListener("change", handleFileChange);
+
+	// ホイールスクロールハンドラー
+	function handleWheelScroll(event: WheelEvent): void {
+		if (!currentFile || isSearching) return;
+
+		event.preventDefault();
+
+		const scrollLines = 3; // 一度にスクロールする行数
+		const scrollAmount = scrollLines * BYTES_PER_LINE;
+		const maxOffset = getMaxOffset();
+
+		if (event.deltaY > 0) {
+			// 下スクロール
+			currentOffset = Math.min(maxOffset, currentOffset + scrollAmount);
+		} else {
+			// 上スクロール
+			currentOffset = Math.max(0, currentOffset - scrollAmount);
+		}
+
+		currentOffset =
+			Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		throttledUpdateDisplay();
+	}
+
+	// キーボード操作ハンドラー
+	function handleKeyDown(event: KeyboardEvent): void {
+		if (!currentFile || isSearching) return;
+
+		const maxOffset = getMaxOffset();
+		const pageSize = LINES_TO_DISPLAY * BYTES_PER_LINE;
+
+		let handled = false;
+
+		switch (event.key) {
+			case "ArrowUp":
+				currentOffset = Math.max(0, currentOffset - BYTES_PER_LINE);
+				handled = true;
+				break;
+			case "ArrowDown":
+				currentOffset = Math.min(
+					maxOffset,
+					currentOffset + BYTES_PER_LINE,
+				);
+				handled = true;
+				break;
+			case "PageUp":
+				currentOffset = Math.max(0, currentOffset - pageSize);
+				handled = true;
+				break;
+			case "PageDown":
+				currentOffset = Math.min(maxOffset, currentOffset + pageSize);
+				handled = true;
+				break;
+			case "Home":
+				currentOffset = 0;
+				handled = true;
+				break;
+			case "End":
+				currentOffset = maxOffset;
+				handled = true;
+				break;
+		}
+
+		if (handled) {
+			event.preventDefault();
+			currentOffset =
+				Math.floor(currentOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+			throttledUpdateDisplay();
+		}
+	}
+
+	// スクロールバーのイベントリスナー
+	scrollbarThumb.addEventListener("mousedown", handleThumbMouseDown);
+	scrollbarTrack.addEventListener("click", handleTrackClick);
+
+
+	// hex-outputエリアのイベントリスナー
+	hexOutput.addEventListener("wheel", handleWheelScroll, { passive: false });
+	
+	// Canvas専用ホイールスクロールイベントリスナー
+	canvas.addEventListener("wheel", handleCanvasWheelScroll, { passive: false });
+
+	// キーボードイベントリスナー（フォーカスが必要）
+	hexOutput.setAttribute("tabindex", "0");
+	hexOutput.addEventListener("keydown", handleKeyDown);
+
+	// 初期化時に動的行数を計算
+	document.addEventListener("DOMContentLoaded", () => {
+		// 少し遅延させて要素のレンダリングを待つ
+		setTimeout(() => {
+			updateChunkSize();
+		}, 100);
+	});
+
+	// ウィンドウリサイズ時の再計算（throttled）
+	const throttledResize = throttle(() => {
+		if (currentFile) {
+			const oldChunkSize = CHUNK_SIZE;
+			updateChunkSize();
+			
+			// チャンクサイズが変更された場合は再描画
+			if (CHUNK_SIZE !== oldChunkSize) {
+				lastUpdateOffset = -1; // キャッシュリセット
+				updateDisplay();
+			}
+		}
+	}, 250); // リサイズは250ms間隔で制限
+
+	window.addEventListener("resize", throttledResize as EventListener);
+
+	// Offset値ジャンプ機能
+	function handleOffsetClick(): void {
+		if (!currentFile || isSearching) return;
+
+		const input = prompt(
+			"Jump to offset (hexadecimal, e.g., 1000 or 0x1000):",
+			"0x" + currentOffset.toString(16).toUpperCase(),
+		);
+
+		if (input === null) return; // キャンセル
+
+		let targetOffset: number;
+		try {
+			// 16進数として解析（0xプレフィックスの有無を問わない）
+			const cleanInput = input.trim().toLowerCase();
+			if (cleanInput.startsWith("0x")) {
+				targetOffset = parseInt(cleanInput, 16);
+			} else {
+				targetOffset = parseInt(cleanInput, 16);
+			}
+
+			if (isNaN(targetOffset) || targetOffset < 0) {
+				alert("Invalid offset value. Please enter a valid hexadecimal number.");
+				return;
+			}
+
+			// ファイルサイズ内に制限
+			const maxOffset = getMaxOffset();
+			targetOffset = Math.min(targetOffset, maxOffset);
+
+			// 行境界に揃える
+			targetOffset = Math.floor(targetOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+			currentOffset = targetOffset;
+			lastUpdateOffset = -1; // キャッシュリセット
+			updateDisplay();
+		} catch (error) {
+			alert("Invalid offset value. Please enter a valid hexadecimal number.");
+		}
+	}
+
+	// Offset情報をクリック可能にする
+	offsetInfo.addEventListener("click", handleOffsetClick);
+
+	// Canvas上でのクリックジャンプ機能
+	function handleCanvasClick(event: MouseEvent): void {
+		if (!currentFile || isSearching) return;
+
+		const rect = canvas.getBoundingClientRect();
+		const x = event.clientX - rect.left;
+		const y = event.clientY - rect.top;
+
+		// Canvas内の座標をピクセル座標に変換
+		const canvasX = Math.floor(x);
+		const canvasY = Math.floor(y);
+
+		// Canvas描画領域内かチェック
+		if (canvasX < 0 || canvasX >= canvas.width || canvasY < 0 || canvasY >= canvas.height) {
+			return;
+		}
+
+		// クリック位置のバイトインデックスを計算
+		const bytesPerCanvasLine = CANVAS_BYTES_PER_LINE;
+		const byteIndex = canvasY * bytesPerCanvasLine + canvasX;
+
+		// 現在のCanvas表示オフセットを考慮してファイル内オフセットを計算
+		const fileByteOffset = currentOffset + byteIndex;
+
+		// ファイルサイズ内かチェック
+		if (fileByteOffset >= totalFileSize) {
+			return;
+		}
+
+		// 16バイト境界に丸めたオフセットを計算
+		const targetOffset = Math.floor(fileByteOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+
+		// 最大オフセット内に制限
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+
+		// ジャンプ実行
+		if (clampedOffset !== currentOffset) {
+			currentOffset = clampedOffset;
+			lastUpdateOffset = -1; // キャッシュリセット
+			updateDisplay();
+		}
+	}
+
+	// Canvasにクリックイベントリスナーを追加
+	canvas.addEventListener("click", handleCanvasClick);
+
+	// ドラッグ&ドロップ機能
+	function handleDragEnter(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter++;
+		if (dragCounter === 1) {
+			dragOverlay.classList.remove("hidden");
+		}
+	}
+
+	function handleDragOver(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		event.dataTransfer!.dropEffect = "copy";
+	}
+
+	function handleDragLeave(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter--;
+		if (dragCounter === 0) {
+			dragOverlay.classList.add("hidden");
+		}
+	}
+
+	function handleDrop(event: DragEvent): void {
+		if (isSearching) return;
+		
+		event.preventDefault();
+		dragCounter = 0;
+		dragOverlay.classList.add("hidden");
+
+		const files = event.dataTransfer?.files;
+		if (files && files.length > 0) {
+			const file = files[0];
+			// 共通のloadFile関数を使用
+			loadFile(file);
+		}
+	}
+
+
+	// ドラッグ&ドロップイベントリスナーをdocumentに追加
+	document.addEventListener("dragenter", handleDragEnter);
+	document.addEventListener("dragover", handleDragOver);
+	document.addEventListener("dragleave", handleDragLeave);
+	document.addEventListener("drop", handleDrop);
+
+	// 検索機能の実装
+	function getCurrentSearchMode(): 'ascii' | 'hex' {
+		const checkedInput = document.querySelector('input[name="search-mode"]:checked') as HTMLInputElement;
+		return checkedInput?.value as 'ascii' | 'hex' || 'ascii';
+	}
+
+	function updateSearchPlaceholder(): void {
+		const mode = getCurrentSearchMode();
+		if (mode === 'ascii') {
+			searchInput.placeholder = 'Enter ASCII text (e.g., "Hello World")';
+		} else {
+			searchInput.placeholder = 'Enter hex bytes (e.g., "48 65 6C 6C 6F")';
+		}
+	}
+
+	function validateSearchInput(input: string, mode: 'ascii' | 'hex'): boolean {
+		if (!input.trim()) {
+			return false;
+		}
+
+		if (mode === 'ascii') {
+			// ASCII文字列は常に有効
+			return true;
+		} else {
+			// 16進数バイトパターンの検証
+			const hexPattern = /^[0-9A-Fa-f\s]+$/;
+			if (!hexPattern.test(input)) {
+				return false;
+			}
+			
+			// スペースで分割して各バイトを検証
+			const bytes = input.trim().split(/\s+/);
+			return bytes.every(byte => {
+				const parsed = parseInt(byte, 16);
+				return !isNaN(parsed) && parsed >= 0 && parsed <= 255;
+			});
+		}
+	}
+
+	function convertToBytePattern(input: string, mode: 'ascii' | 'hex'): Uint8Array | null {
+		if (!input.trim()) {
+			return null;
+		}
+
+		try {
+			if (mode === 'ascii') {
+				// ASCII文字列をバイト配列に変換
+				return new TextEncoder().encode(input);
+			} else {
+				// 16進数文字列をバイト配列に変換
+				const bytes = input.trim().split(/\s+/).map(byte => parseInt(byte, 16));
+				return new Uint8Array(bytes);
+			}
+		} catch (error) {
+			console.error('Pattern conversion error:', error);
+			return null;
+		}
+	}
+
+	function updateSearchButtonState(): void {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		const isValid = validateSearchInput(input, mode);
+		
+		if (isValid) {
+			searchInput.classList.remove('invalid');
+			searchToggleBtn.disabled = !currentFile;
+		} else {
+			searchInput.classList.add('invalid');
+			searchToggleBtn.disabled = true;
+		}
+		
+		// ボタンテキストを更新
+		if (isSearching) {
+			searchBtnText.textContent = 'Stop';
+			searchToggleBtn.className = 'btn btn-secondary';
+		} else {
+			searchBtnText.textContent = 'Search';
+			searchToggleBtn.className = 'btn btn-primary';
+		}
+		
+		// 検索中はスクロールバーとファイル選択を無効化
+		if (isSearching) {
+			customScrollbar.classList.add('disabled');
+			fileInput.disabled = true;
+		} else {
+			customScrollbar.classList.remove('disabled');
+			fileInput.disabled = false;
+		}
+	}
+
+	// 検索入力の変更イベント
+	searchInput.addEventListener('input', updateSearchButtonState);
+
+	// 検索モードの変更イベント
+	searchModeInputs.forEach(input => {
+		input.addEventListener('change', () => {
+			updateSearchPlaceholder();
+			updateSearchButtonState();
+		});
+	});
+
+	// 初期化
+	updateSearchPlaceholder();
+	updateSearchButtonState();
+
+	// Web Workerを初期化
+	function initializeSearchWorker(): void {
+		if (!searchWorker) {
+			// 同じ階層のWorkerファイルを読み込み（アンダースコア プレフィックス）
+			const workerScript = new URL('./_search-worker.js', import.meta.url);
+			searchWorker = new Worker(workerScript, { type: 'module' });
+			searchWorker.onmessage = handleWorkerMessage;
+			searchWorker.onerror = (error) => {
+				console.error('HexDump search worker error:', error);
+				statusMessage.textContent = 'Search worker error occurred';
+				statusMessage.classList.add('error');
+				isSearching = false;
+				updateSearchButtonState();
+			};
+		}
+	}
+
+	// Workerからのメッセージを処理
+	function handleWorkerMessage(event: MessageEvent): void {
+		const data = event.data;
+		const type = data.type;
+		
+		switch (type) {
+			case 'progress':
+				// 推定残り時間を分かりやすく表示
+				const remainingSeconds = Math.ceil(data.estimatedRemainingMs / 1000);
+				let timeText = '';
+				
+				if (remainingSeconds < 60) {
+					timeText = `~${remainingSeconds}s`;
+				} else if (remainingSeconds < 3600) {
+					const minutes = Math.ceil(remainingSeconds / 60);
+					timeText = `~${minutes}m`;
+				} else {
+					const hours = Math.floor(remainingSeconds / 3600);
+					const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+					timeText = `~${hours}h${minutes}m`;
+				}
+				
+				statusMessage.textContent = `Searching... ${data.progress.toFixed(1)}% (${timeText} remaining)`;
+				break;
+				
+			case 'found':
+				// 検索成功
+				searchResultOffset = data.offset;
+				statusMessage.textContent = `Found at offset 0x${data.offset.toString(16).toUpperCase()}`;
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('success');
+				
+				// 結果の位置にジャンプしてからfinishSearchを呼ぶ
+				jumpToOffset(data.offset);
+				
+				// 検索状態をクリア（ハイライトは残す）
+				isSearching = false;
+				updateSearchButtonState();
+				
+				// 3秒後にステータスをリセット
+				setTimeout(() => {
+					statusMessage.textContent = 'Ready';
+					statusMessage.classList.remove('success', 'warning', 'error');
+				}, 3000);
+				break;
+				
+			case 'not_found':
+				// 見つからなかった
+				statusMessage.textContent = 'Pattern not found';
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('warning');
+				finishSearch();
+				break;
+				
+			case 'cancelled':
+				// 検索キャンセル
+				statusMessage.textContent = 'Search cancelled';
+				statusMessage.classList.remove('loading');
+				finishSearch();
+				break;
+				
+			default:
+				console.warn('Unknown worker message type:', type);
+		}
+	}
+
+
+	// 検索完了処理
+	function finishSearch(): void {
+		isSearching = false;
+		updateSearchButtonState();
+		
+		// 3秒後にステータスをリセット
+		setTimeout(() => {
+			statusMessage.textContent = 'Ready';
+			statusMessage.classList.remove('success', 'warning', 'error');
+		}, 3000);
+	}
+
+	// 初期化時にWorkerを作成
+	initializeSearchWorker();
+
+
+	// 検索実行関数（Web Workerベース）
+	async function executeSearch(): Promise<void> {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		
+		if (!input || !currentFile || !searchWorker) {
+			return;
+		}
+
+		// 検索パターンを変換
+		const pattern = convertToBytePattern(input, mode);
+		if (!pattern) {
+			statusMessage.textContent = 'Invalid search pattern';
+			statusMessage.classList.add('error');
+			setTimeout(() => {
+				statusMessage.textContent = 'Ready';
+				statusMessage.classList.remove('error');
+			}, 3000);
+			return;
+		}
+
+		// 前回の検索結果をクリア（新しい検索開始時のみ）
+		searchResultOffset = -1;
+		
+		// 検索状態を設定
+		isSearching = true;
+		searchPattern = pattern;
+		
+		// UI状態を更新
+		updateSearchButtonState();
+		statusMessage.textContent = 'Searching...';
+		statusMessage.classList.add('loading');
+		
+		// 表示を更新してハイライトをクリア
+		updateDisplay();
+
+		// Web Workerに検索を依頼（ファイルオブジェクト含む）
+		searchWorker.postMessage({
+			type: 'search',
+			data: {
+				file: currentFile, // ファイルオブジェクトを直接送信
+				pattern: Array.from(pattern), // Uint8Arrayを配列に変換
+				startOffset: currentOffset,
+				chunkSize: 4 * 1024 * 1024 // 4MB chunks（I/O効率向上）
+			}
+		});
+	}
+
+	// 検索停止関数（Web Workerベース）
+	function stopSearch(): void {
+		if (searchWorker && isSearching) {
+			searchWorker.postMessage({
+				type: 'cancel'
+			});
+		}
+	}
+
+	// オフセットにジャンプする関数
+	function jumpToOffset(targetOffset: number): void {
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+		const alignedOffset = Math.floor(clampedOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		currentOffset = alignedOffset;
+		lastUpdateOffset = -1; // キャッシュリセット
+		updateDisplay();
+	}
+
+	// 検索トグルボタンのイベントリスナー
+	searchToggleBtn.addEventListener('click', () => {
+		if (isSearching) {
+			stopSearch();
+		} else {
+			executeSearch();
+		}
+	});
+
+	// Enterキーでの検索実行
+	searchInput.addEventListener('keydown', (event) => {
+		if (event.key === 'Enter' && !searchToggleBtn.disabled) {
+			if (isSearching) {
+				stopSearch();
+			} else {
+				executeSearch();
+			}
+		}
+	});
+
+</script>

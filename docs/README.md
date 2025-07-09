@@ -39,18 +39,29 @@ Web Toolboxは、セキュリティやシステム管理に役立つWebベース
 ```
 src/
 ├── components/
-│   ├── GlobalStyles.astro      # 共通スタイルシステム
-│   ├── SideMenu.astro          # サイドメニューナビゲーション
-│   ├── PasswordGenerator.astro # パスワード生成ツール
-│   └── HexDump.astro          # Hexdumpツール
+│   ├── common/
+│   │   ├── FileInput.astro         # ファイル選択共通コンポーネント
+│   │   ├── ToolCard.astro          # ホーム画面ツールカード
+│   │   └── ToolContainer.astro     # ツールページ共通レイアウト
+│   ├── layout/
+│   │   ├── GlobalStyles.astro      # 共通スタイルシステム
+│   │   └── SideMenu.astro          # サイドメニューナビゲーション
+│   └── __*.astro                   # 古いコンポーネント（統合後は不要）
 ├── layouts/
-│   └── Layout.astro           # メインレイアウト（サイドメニュー対応）
+│   └── Layout.astro                # メインレイアウト（サイドメニュー対応）
 └── pages/
-    └── index.astro            # ツール切り替え機能付きメインページ
+    ├── index.astro                 # ツール切り替え機能付きメインページ
+    ├── password-generator/
+    │   └── index.astro             # パスワード生成ツール（統合版）
+    ├── hexdump/
+    │   ├── index.astro             # Hexdumpツール（統合版）
+    │   └── _search-worker.js       # 検索用Web Worker
+    └── __*.astro                   # 古いページ（統合後は不要）
 docs/
 ├── README.md
 ├── password-generator.md
-└── hexdump.md
+├── hexdump.md
+└── components.md                   # 共通コンポーネント仕様
 ```
 
 ## 開発コマンド
@@ -113,8 +124,25 @@ npm run preview  # プレビュー
 
 ### 拡張性
 - モジュラー設計
+- 共通コンポーネントシステム
 - 新しいツールの追加容易性
 - 既存ツールの機能拡張対応
+
+## 共通コンポーネント
+
+### 設計思想
+- **再利用性**: 重複コードの削減
+- **一貫性**: 統一されたUI/UX
+- **保守性**: 中央集権的な管理
+- **拡張性**: 新機能の追加容易性
+
+### 主要コンポーネント
+- **ToolContainer**: ツールページ共通レイアウト
+- **ToolCard**: ホーム画面ツールカード
+- **FileInput**: ファイル選択共通コンポーネント
+- **GlobalStyles**: 統一スタイルシステム
+
+**詳細:** [components.md](./components.md)
 
 ## 今後の拡張予定
 

@@ -1,5 +1,23 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import ToolCard from '../components/common/ToolCard.astro';
+
+const tools = [
+	{
+		href: '/password-generator/',
+		icon: '🔐',
+		title: 'Password Generator',
+		description: 'Generate secure passwords with customizable options',
+		features: ['Multiple passwords', 'Cryptographically secure', 'Custom character sets']
+	},
+	{
+		href: '/hexdump/',
+		icon: '📊',
+		title: 'Hex Dump Tool',
+		description: 'Binary file analysis with hexdump display and visualization',
+		features: ['Visual representation', 'Color-coded bytes', 'Virtual scrolling']
+	}
+];
 ---
 
 <Layout title="Web Toolbox - Security & Development Tools">
@@ -10,27 +28,16 @@ import Layout from '../layouts/Layout.astro';
 		</div>
 
 		<div class="tools-grid">
-			<a href="/password-generator" class="tool-card glass-card">
-				<div class="tool-icon">🔐</div>
-				<h3>Password Generator</h3>
-				<p>Generate secure passwords with customizable options</p>
-				<div class="tool-features">
-					<span class="feature">Multiple passwords</span>
-					<span class="feature">Cryptographically secure</span>
-					<span class="feature">Custom character sets</span>
-				</div>
-			</a>
-
-			<a href="/hexdump" class="tool-card glass-card">
-				<div class="tool-icon">📊</div>
-				<h3>Hex Dump Tool</h3>
-				<p>Binary file analysis with hexdump display and visualization</p>
-				<div class="tool-features">
-					<span class="feature">Visual representation</span>
-					<span class="feature">Color-coded bytes</span>
-					<span class="feature">Virtual scrolling</span>
-				</div>
-			</a>
+			{tools.map((tool, index) => (
+				<ToolCard 
+					href={tool.href}
+					icon={tool.icon}
+					title={tool.title}
+					description={tool.description}
+					features={tool.features}
+					class={`tool-card-${index + 1}`}
+				/>
+			))}
 		</div>
 
 		<div class="home-footer">
@@ -80,77 +87,13 @@ import Layout from '../layouts/Layout.astro';
 		margin-bottom: 4rem;
 	}
 
-	.tool-card {
-		padding: 2rem;
-		text-decoration: none;
-		color: inherit;
-		transition: all 0.3s ease;
-		border-radius: var(--radius-xl);
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		text-align: center;
-		min-height: 280px;
-		position: relative;
-		overflow: hidden;
+	/* Tool card animation delays */
+	.tool-card-1 {
+		animation-delay: 0.1s;
 	}
 
-	.tool-card::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: -100%;
-		width: 100%;
-		height: 100%;
-		background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.1), transparent);
-		transition: left 0.5s ease;
-	}
-
-	.tool-card:hover::before {
-		left: 100%;
-	}
-
-	.tool-card:hover {
-		transform: translateY(-8px);
-		box-shadow: var(--shadow-xl), var(--shadow-glow);
-		border-color: var(--accent-primary);
-	}
-
-	.tool-icon {
-		font-size: 4rem;
-		margin-bottom: 1.5rem;
-		filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
-	}
-
-	.tool-card h3 {
-		font-size: 1.5rem;
-		font-weight: 600;
-		margin-bottom: 1rem;
-		color: var(--text-primary);
-	}
-
-	.tool-card p {
-		color: var(--text-secondary);
-		margin-bottom: 1.5rem;
-		line-height: 1.6;
-		flex: 1;
-	}
-
-	.tool-features {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		justify-content: center;
-	}
-
-	.feature {
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-md);
-		padding: 0.25rem 0.75rem;
-		font-size: 0.75rem;
-		color: var(--text-accent);
-		font-weight: 500;
+	.tool-card-2 {
+		animation-delay: 0.2s;
 	}
 
 	.home-footer {
@@ -164,18 +107,6 @@ import Layout from '../layouts/Layout.astro';
 	}
 
 	/* Animation */
-	.tool-card {
-		animation: fadeIn 0.6s ease-out;
-	}
-
-	.tool-card:nth-child(1) {
-		animation-delay: 0.1s;
-	}
-
-	.tool-card:nth-child(2) {
-		animation-delay: 0.2s;
-	}
-
 	.home-header {
 		animation: fadeIn 0.8s ease-out;
 	}
