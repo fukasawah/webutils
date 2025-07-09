@@ -1,14 +1,13 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import ToolContainer from '../../components/common/ToolContainer.astro';
 ---
 
 <Layout title="Password Generator - Web Toolbox" currentTool="password-generator">
-	<ToolContainer
-		title="Password Generator"
-		description="Generate secure passwords with customizable options"
-		icon="🔐"
-	>
+	<div class="tool-container">
+		<div class="tool-header">
+			<h1>🔐 Password Generator</h1>
+			<p>Generate secure passwords with customizable options</p>
+		</div>
 		<div class="glass-card tool-controls">
 			<div class="control-row">
 				<div class="control-group">
@@ -63,7 +62,7 @@ import ToolContainer from '../../components/common/ToolContainer.astro';
 				placeholder="Click 'Generate Passwords' to create secure passwords..."
 			></textarea>
 		</div>
-	</ToolContainer>
+	</div>
 </Layout>
 
 <script>

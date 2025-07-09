@@ -1,15 +1,14 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import ToolContainer from '../../components/common/ToolContainer.astro';
 import FileInput from '../../components/common/FileInput.astro';
 ---
 
 <Layout title="Hex Dump Tool - Web Toolbox" currentTool="hexdump">
-	<ToolContainer
-		title="Hex Dump Tool"
-		description="Binary file analysis with hexdump display and visual representation"
-		icon="📊"
-	>
+	<div class="tool-container">
+		<div class="tool-header">
+			<h1>📊 Hex Dump Tool</h1>
+			<p>Binary file analysis with hexdump display and visual representation</p>
+		</div>
 		<div class="glass-card tool-controls">
 			<FileInput 
 				id="file-input"
@@ -106,7 +105,7 @@ import FileInput from '../../components/common/FileInput.astro';
 				<div class="drag-text">Drop file here to analyze</div>
 			</div>
 		</div>
-	</ToolContainer>
+	</div>
 </Layout>
 
 <script>

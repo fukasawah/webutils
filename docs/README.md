@@ -41,10 +41,9 @@ src/
 ├── components/
 │   ├── common/
 │   │   ├── FileInput.astro         # ファイル選択共通コンポーネント
-│   │   ├── ToolCard.astro          # ホーム画面ツールカード
-│   │   └── ToolContainer.astro     # ツールページ共通レイアウト
+│   │   └── ToolCard.astro          # ホーム画面ツールカード
 │   ├── layout/
-│   │   ├── GlobalStyles.astro      # 共通スタイルシステム
+│   │   ├── GlobalStyles.astro      # 共通スタイルシステム（統合・最適化済み）
 │   │   └── SideMenu.astro          # サイドメニューナビゲーション
 │   └── __*.astro                   # 古いコンポーネント（統合後は不要）
 ├── layouts/
