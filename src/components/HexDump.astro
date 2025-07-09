@@ -29,6 +29,27 @@
 		</div>
 	</div>
 
+	<div class="glass-card search-panel">
+		<div class="search-controls">
+			<div class="search-input-group">
+				<input type="text" id="search-input" class="search-input" placeholder="Enter search pattern..." />
+				<div class="search-mode">
+					<label class="search-mode-option">
+						<input type="radio" name="search-mode" value="ascii" checked />
+						<span>ASCII</span>
+					</label>
+					<label class="search-mode-option">
+						<input type="radio" name="search-mode" value="hex" />
+						<span>Hex</span>
+					</label>
+				</div>
+			</div>
+			<button id="search-toggle-btn" class="btn btn-primary" disabled>
+				<span id="search-btn-text">Search</span>
+			</button>
+		</div>
+	</div>
+
 	<div class="viewer-grid">
 		<div class="glass-card hex-output-container">
 			<div class="result-header">
@@ -127,6 +148,12 @@
 		"status-message",
 	) as HTMLSpanElement;
 	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
+	
+	// 検索関連の要素
+	const searchInput = document.getElementById("search-input") as HTMLInputElement;
+	const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
+	const searchBtnText = document.getElementById("search-btn-text") as HTMLSpanElement;
+	const searchModeInputs = document.querySelectorAll('input[name="search-mode"]') as NodeListOf<HTMLInputElement>;
 
 	let currentFile: File | null = null;
 	let totalFileSize = 0;
@@ -137,6 +164,12 @@
 	let isLoading = false;
 	let lastUpdateOffset = -1;
 	let dragCounter = 0; // ドラッグイベントの重複防止
+	
+	// 検索関連の状態変数
+	let isSearching = false;
+	let searchAbortController: AbortController | null = null;
+	let searchResultOffset = -1;
+	let searchPattern: Uint8Array | null = null;
 	
 	const BYTES_PER_LINE = 16;
 	const CANVAS_BYTES_PER_LINE = 256;
@@ -329,11 +362,24 @@
 
 			for (let j = 0; j < BYTES_PER_LINE; j++) {
 				const byteIndex = i + j;
+				const currentByteOffset = fileOffset + byteIndex;
 				
 				if (byteIndex < bytes.length) {
 					const byte = bytes[byteIndex];
-					hexPart += byteToHex(byte) + " ";
-					textPart += byteToChar(byte);
+					let hexByte = byteToHex(byte);
+					let textByte = byteToChar(byte);
+					
+					// 検索結果のハイライト処理
+					if (searchResultOffset !== -1 && searchPattern) {
+						const searchEnd = searchResultOffset + searchPattern.length - 1;
+						if (currentByteOffset >= searchResultOffset && currentByteOffset <= searchEnd) {
+							hexByte = `<span class="search-highlight">${hexByte}</span>`;
+							textByte = `<span class="search-highlight">${textByte}</span>`;
+						}
+					}
+					
+					hexPart += hexByte + " ";
+					textPart += textByte;
 				} else {
 					hexPart += "   ";
 					textPart += " ";
@@ -440,7 +486,7 @@
 	}
 
 	function handleThumbMouseDown(event: MouseEvent): void {
-		if (!currentFile) return;
+		if (!currentFile || isSearching) return;
 
 		isDragging = true;
 		dragStartY = event.clientY;
@@ -456,7 +502,7 @@
 	const throttledUpdateDisplay = throttle(updateDisplay, 16); // 60FPS相当
 
 	function handleThumbMouseMove(event: MouseEvent): void {
-		if (!isDragging || !currentFile) return;
+		if (!isDragging || !currentFile || isSearching) return;
 
 		const deltaY = event.clientY - dragStartY;
 		const trackHeight = scrollbarTrack.clientHeight;
@@ -486,7 +532,7 @@
 	}
 
 	function handleTrackClick(event: MouseEvent): void {
-		if (!currentFile || event.target === scrollbarThumb) return;
+		if (!currentFile || event.target === scrollbarThumb || isSearching) return;
 
 		const rect = scrollbarTrack.getBoundingClientRect();
 		const clickY = event.clientY - rect.top;
@@ -505,24 +551,28 @@
 		updateDisplay(); // クリック時は即座に更新
 	}
 
-	async function handleFileChange(event: Event): Promise<void> {
-		const target = event.target as HTMLInputElement;
-		const file = target.files?.[0];
+	// ファイル選択をクリア
+	function clearFileSelection(): void {
+		currentFile = null;
+		totalFileSize = 0;
+		currentOffset = 0;
+		lastUpdateOffset = -1; // キャッシュリセット
+		customScrollbar.classList.add("hidden");
+		hexOutput.textContent = "";
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		updateScrollInfo(0, 0);
+		setLoadingState(false, "Ready");
+		
+		// 検索結果をクリア
+		searchResultOffset = -1;
+		searchPattern = null;
+		
+		// 検索ボタンの状態を更新
+		updateSearchButtonState();
+	}
 
-		if (!file) {
-			currentFile = null;
-			totalFileSize = 0;
-			currentOffset = 0;
-			lastUpdateOffset = -1; // キャッシュリセット
-			customScrollbar.classList.add("hidden");
-			hexOutput.textContent = "";
-			ctx.clearRect(0, 0, canvas.width, canvas.height);
-			updateScrollInfo(0, 0);
-			statusMessage.textContent = "Ready";
-			statusMessage.classList.remove("loading");
-			return;
-		}
-
+	// ファイル読み込み処理（共通）
+	async function loadFile(file: File): Promise<void> {
 		currentFile = file;
 		totalFileSize = file.size;
 		currentOffset = 0;
@@ -533,21 +583,41 @@
 
 		// 表示行数を動的に計算して更新
 		updateChunkSize();
+		
+		// 検索ボタンの状態を更新
+		updateSearchButtonState();
+		
+		// 検索結果をクリア
+		searchResultOffset = -1;
+		searchPattern = null;
 
 		try {
 			await updateDisplay();
 		} catch (error) {
 			console.error("Error reading file:", error);
-			statusMessage.textContent = "Error loading file";
-			statusMessage.classList.remove("loading");
+			setLoadingState(false, "Error loading file");
 		}
+	}
+
+	async function handleFileChange(event: Event): Promise<void> {
+		if (isSearching) return;
+		
+		const target = event.target as HTMLInputElement;
+		const file = target.files?.[0];
+
+		if (!file) {
+			clearFileSelection();
+			return;
+		}
+
+		await loadFile(file);
 	}
 
 	fileInput.addEventListener("change", handleFileChange);
 
 	// ホイールスクロールハンドラー
 	function handleWheelScroll(event: WheelEvent): void {
-		if (!currentFile) return;
+		if (!currentFile || isSearching) return;
 
 		event.preventDefault();
 
@@ -570,7 +640,7 @@
 
 	// キーボード操作ハンドラー
 	function handleKeyDown(event: KeyboardEvent): void {
-		if (!currentFile) return;
+		if (!currentFile || isSearching) return;
 
 		const maxOffset = getMaxOffset();
 		const pageSize = LINES_TO_DISPLAY * BYTES_PER_LINE;
@@ -652,7 +722,7 @@
 
 	// Offset値ジャンプ機能
 	function handleOffsetClick(): void {
-		if (!currentFile) return;
+		if (!currentFile || isSearching) return;
 
 		const input = prompt(
 			"Jump to offset (hexadecimal, e.g., 1000 or 0x1000):",
@@ -696,7 +766,7 @@
 
 	// Canvas上でのクリックジャンプ機能
 	function handleCanvasClick(event: MouseEvent): void {
-		if (!currentFile) return;
+		if (!currentFile || isSearching) return;
 
 		const rect = canvas.getBoundingClientRect();
 		const x = event.clientX - rect.left;
@@ -743,6 +813,8 @@
 
 	// ドラッグ&ドロップ機能
 	function handleDragEnter(event: DragEvent): void {
+		if (isSearching) return;
+		
 		event.preventDefault();
 		dragCounter++;
 		if (dragCounter === 1) {
@@ -751,11 +823,15 @@
 	}
 
 	function handleDragOver(event: DragEvent): void {
+		if (isSearching) return;
+		
 		event.preventDefault();
 		event.dataTransfer!.dropEffect = "copy";
 	}
 
 	function handleDragLeave(event: DragEvent): void {
+		if (isSearching) return;
+		
 		event.preventDefault();
 		dragCounter--;
 		if (dragCounter === 0) {
@@ -764,6 +840,8 @@
 	}
 
 	function handleDrop(event: DragEvent): void {
+		if (isSearching) return;
+		
 		event.preventDefault();
 		dragCounter = 0;
 		dragOverlay.classList.add("hidden");
@@ -771,37 +849,321 @@
 		const files = event.dataTransfer?.files;
 		if (files && files.length > 0) {
 			const file = files[0];
-			// 既存のhandleFileChange関数のロジックを流用
-			processDroppedFile(file);
+			// 共通のloadFile関数を使用
+			loadFile(file);
 		}
 	}
 
-	async function processDroppedFile(file: File): Promise<void> {
-		currentFile = file;
-		totalFileSize = file.size;
-		currentOffset = 0;
-		lastUpdateOffset = -1; // キャッシュリセット
-
-		fileName.textContent = file.name;
-		fileSize.textContent = formatFileSize(file.size);
-
-		// 表示行数を動的に計算して更新
-		updateChunkSize();
-
-		try {
-			await updateDisplay();
-		} catch (error) {
-			console.error("Error reading file:", error);
-			statusMessage.textContent = "Error loading file";
-			statusMessage.classList.remove("loading");
-		}
-	}
 
 	// ドラッグ&ドロップイベントリスナーをdocumentに追加
 	document.addEventListener("dragenter", handleDragEnter);
 	document.addEventListener("dragover", handleDragOver);
 	document.addEventListener("dragleave", handleDragLeave);
 	document.addEventListener("drop", handleDrop);
+
+	// 検索機能の実装
+	function getCurrentSearchMode(): 'ascii' | 'hex' {
+		const checkedInput = document.querySelector('input[name="search-mode"]:checked') as HTMLInputElement;
+		return checkedInput?.value as 'ascii' | 'hex' || 'ascii';
+	}
+
+	function updateSearchPlaceholder(): void {
+		const mode = getCurrentSearchMode();
+		if (mode === 'ascii') {
+			searchInput.placeholder = 'Enter ASCII text (e.g., "Hello World")';
+		} else {
+			searchInput.placeholder = 'Enter hex bytes (e.g., "48 65 6C 6C 6F")';
+		}
+	}
+
+	function validateSearchInput(input: string, mode: 'ascii' | 'hex'): boolean {
+		if (!input.trim()) {
+			return false;
+		}
+
+		if (mode === 'ascii') {
+			// ASCII文字列は常に有効
+			return true;
+		} else {
+			// 16進数バイトパターンの検証
+			const hexPattern = /^[0-9A-Fa-f\s]+$/;
+			if (!hexPattern.test(input)) {
+				return false;
+			}
+			
+			// スペースで分割して各バイトを検証
+			const bytes = input.trim().split(/\s+/);
+			return bytes.every(byte => {
+				const parsed = parseInt(byte, 16);
+				return !isNaN(parsed) && parsed >= 0 && parsed <= 255;
+			});
+		}
+	}
+
+	function convertToBytePattern(input: string, mode: 'ascii' | 'hex'): Uint8Array | null {
+		if (!input.trim()) {
+			return null;
+		}
+
+		try {
+			if (mode === 'ascii') {
+				// ASCII文字列をバイト配列に変換
+				return new TextEncoder().encode(input);
+			} else {
+				// 16進数文字列をバイト配列に変換
+				const bytes = input.trim().split(/\s+/).map(byte => parseInt(byte, 16));
+				return new Uint8Array(bytes);
+			}
+		} catch (error) {
+			console.error('Pattern conversion error:', error);
+			return null;
+		}
+	}
+
+	function updateSearchButtonState(): void {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		const isValid = validateSearchInput(input, mode);
+		
+		if (isValid) {
+			searchInput.classList.remove('invalid');
+			searchToggleBtn.disabled = !currentFile;
+		} else {
+			searchInput.classList.add('invalid');
+			searchToggleBtn.disabled = true;
+		}
+		
+		// ボタンテキストを更新
+		if (isSearching) {
+			searchBtnText.textContent = 'Stop';
+			searchToggleBtn.className = 'btn btn-secondary';
+		} else {
+			searchBtnText.textContent = 'Search';
+			searchToggleBtn.className = 'btn btn-primary';
+		}
+		
+		// 検索中はスクロールバーとファイル選択を無効化
+		if (isSearching) {
+			customScrollbar.classList.add('disabled');
+			fileInput.disabled = true;
+		} else {
+			customScrollbar.classList.remove('disabled');
+			fileInput.disabled = false;
+		}
+	}
+
+	// 検索入力の変更イベント
+	searchInput.addEventListener('input', updateSearchButtonState);
+
+	// 検索モードの変更イベント
+	searchModeInputs.forEach(input => {
+		input.addEventListener('change', () => {
+			updateSearchPlaceholder();
+			updateSearchButtonState();
+		});
+	});
+
+	// 初期化
+	updateSearchPlaceholder();
+	updateSearchButtonState();
+
+	// バイナリ検索アルゴリズム（Boyer-Moore類似）
+	function searchInBuffer(buffer: Uint8Array, pattern: Uint8Array, startPos: number = 0): number {
+		if (pattern.length === 0 || pattern.length > buffer.length) {
+			return -1;
+		}
+
+		// 簡単なBrute Force検索（小さなパターンに適している）
+		for (let i = startPos; i <= buffer.length - pattern.length; i++) {
+			let found = true;
+			for (let j = 0; j < pattern.length; j++) {
+				if (buffer[i + j] !== pattern[j]) {
+					found = false;
+					break;
+				}
+			}
+			if (found) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	// 非同期検索関数
+	async function searchInFile(
+		pattern: Uint8Array,
+		startOffset: number = 0,
+		onProgress?: (progress: number, currentOffset: number) => void
+	): Promise<number> {
+		if (!currentFile) {
+			throw new Error('No file loaded');
+		}
+
+		const SEARCH_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+		const OVERLAP_SIZE = pattern.length - 1; // パターンがチャンク境界にまたがる場合の重複
+		let searchOffset = startOffset;
+		let previousChunkEnd = new Uint8Array(0);
+
+		while (searchOffset < totalFileSize) {
+			// AbortController でキャンセル可能にする
+			if (searchAbortController?.signal.aborted) {
+				throw new Error('Search aborted');
+			}
+
+			const remainingSize = totalFileSize - searchOffset;
+			const chunkSize = Math.min(SEARCH_CHUNK_SIZE, remainingSize);
+			
+			// チャンクを読み込み
+			const chunk = await loadChunk(searchOffset, chunkSize);
+			if (!chunk) {
+				break;
+			}
+
+			const chunkData = new Uint8Array(chunk);
+			
+			// 前のチャンクの終端と結合（境界検索用）
+			const searchBuffer = new Uint8Array(previousChunkEnd.length + chunkData.length);
+			searchBuffer.set(previousChunkEnd, 0);
+			searchBuffer.set(chunkData, previousChunkEnd.length);
+
+			// バッファ内でパターンを検索
+			const foundIndex = searchInBuffer(searchBuffer, pattern);
+			if (foundIndex !== -1) {
+				const fileOffset = searchOffset - previousChunkEnd.length + foundIndex;
+				return fileOffset;
+			}
+
+			// 進行状況を報告
+			if (onProgress) {
+				const progress = (searchOffset / totalFileSize) * 100;
+				onProgress(progress, searchOffset);
+			}
+
+			// 次のチャンクのための準備
+			previousChunkEnd = chunkData.slice(Math.max(0, chunkData.length - OVERLAP_SIZE));
+			searchOffset += chunkSize;
+
+			// UIの応答性を保つため、少し待つ
+			await new Promise(resolve => setTimeout(resolve, 1));
+		}
+
+		return -1; // 見つからなかった
+	}
+
+	// 検索実行関数
+	async function executeSearch(): Promise<void> {
+		const input = searchInput.value.trim();
+		const mode = getCurrentSearchMode();
+		
+		if (!input || !currentFile) {
+			return;
+		}
+
+		// 検索パターンを変換
+		const pattern = convertToBytePattern(input, mode);
+		if (!pattern) {
+			statusMessage.textContent = 'Invalid search pattern';
+			statusMessage.classList.add('error');
+			setTimeout(() => {
+				statusMessage.textContent = 'Ready';
+				statusMessage.classList.remove('error');
+			}, 3000);
+			return;
+		}
+
+		// 検索状態を設定
+		isSearching = true;
+		searchAbortController = new AbortController();
+		searchPattern = pattern;
+		
+		// UI状態を更新
+		updateSearchButtonState();
+		statusMessage.textContent = 'Searching...';
+		statusMessage.classList.add('loading');
+
+		try {
+			// 現在のオフセットから検索開始
+			const startOffset = currentOffset;
+			const foundOffset = await searchInFile(pattern, startOffset, (progress) => {
+				statusMessage.textContent = `Searching... ${progress.toFixed(1)}%`;
+			});
+
+			if (foundOffset !== -1) {
+				// 検索成功
+				searchResultOffset = foundOffset;
+				statusMessage.textContent = `Found at offset 0x${foundOffset.toString(16).toUpperCase()}`;
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('success');
+				
+				// 結果の位置にジャンプ
+				jumpToOffset(foundOffset);
+			} else {
+				// 見つからなかった
+				statusMessage.textContent = 'Pattern not found';
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('warning');
+			}
+		} catch (error) {
+			if (error instanceof Error && error.message === 'Search aborted') {
+				statusMessage.textContent = 'Search cancelled';
+				statusMessage.classList.remove('loading');
+			} else {
+				console.error('Search error:', error);
+				statusMessage.textContent = 'Search error occurred';
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('error');
+			}
+		} finally {
+			// 検索状態をリセット
+			isSearching = false;
+			searchAbortController = null;
+			updateSearchButtonState();
+			
+			// 3秒後にステータスをリセット
+			setTimeout(() => {
+				statusMessage.textContent = 'Ready';
+				statusMessage.classList.remove('success', 'warning', 'error');
+			}, 3000);
+		}
+	}
+
+	// 検索停止関数
+	function stopSearch(): void {
+		if (searchAbortController) {
+			searchAbortController.abort();
+		}
+	}
+
+	// オフセットにジャンプする関数
+	function jumpToOffset(targetOffset: number): void {
+		const maxOffset = getMaxOffset();
+		const clampedOffset = Math.min(targetOffset, maxOffset);
+		const alignedOffset = Math.floor(clampedOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
+		
+		currentOffset = alignedOffset;
+		lastUpdateOffset = -1; // キャッシュリセット
+		updateDisplay();
+	}
+
+	// 検索トグルボタンのイベントリスナー
+	searchToggleBtn.addEventListener('click', () => {
+		if (isSearching) {
+			stopSearch();
+		} else {
+			executeSearch();
+		}
+	});
+
+	// Enterキーでの検索実行
+	searchInput.addEventListener('keydown', (event) => {
+		if (event.key === 'Enter' && !searchToggleBtn.disabled) {
+			if (isSearching) {
+				stopSearch();
+			} else {
+				executeSearch();
+			}
+		}
+	});
 
 </script>
 
@@ -892,6 +1254,11 @@
 
 	.custom-scrollbar.hidden {
 		display: none;
+	}
+
+	.custom-scrollbar.disabled {
+		opacity: 0.5;
+		pointer-events: none;
 	}
 
 	.scrollbar-track {
@@ -1046,6 +1413,18 @@
 		display: inline-block;
 	}
 
+	#status-message.success {
+		color: var(--accent-success);
+	}
+
+	#status-message.warning {
+		color: var(--accent-warning);
+	}
+
+	#status-message.error {
+		color: var(--accent-error);
+	}
+
 	@keyframes spin {
 		0% {
 			transform: rotate(0deg);
@@ -1111,6 +1490,112 @@
 		border-color: var(--accent-success);
 		background: var(--bg-card);
 		color: var(--accent-success);
+	}
+
+	.file-input input:disabled + .file-input-label {
+		opacity: 0.5;
+		cursor: not-allowed;
+		background: var(--bg-secondary);
+		border-color: var(--border-secondary);
+		color: var(--text-muted);
+	}
+
+	/* 検索パネル */
+	.search-panel {
+		margin-bottom: 1.5rem;
+	}
+
+	.search-controls {
+		display: flex;
+		gap: 1rem;
+		align-items: flex-end;
+	}
+
+	.search-input-group {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.search-input {
+		width: 100%;
+		padding: 0.5rem 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		color: var(--text-primary);
+		font-size: 0.875rem;
+		font-family: var(--font-mono);
+		transition: all 0.2s ease;
+	}
+
+	.search-input:focus {
+		outline: none;
+		border-color: var(--accent-primary);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+	}
+
+	.search-input.invalid {
+		border-color: var(--accent-error);
+		box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+	}
+
+	.search-mode {
+		display: flex;
+		gap: 1rem;
+	}
+
+	.search-mode-option {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		cursor: pointer;
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		transition: color 0.2s ease;
+	}
+
+	.search-mode-option:hover {
+		color: var(--text-primary);
+	}
+
+	.search-mode-option input[type="radio"] {
+		width: 0.875rem;
+		height: 0.875rem;
+		appearance: none;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: 50%;
+		position: relative;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.search-mode-option input[type="radio"]:checked {
+		background: var(--accent-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.search-mode-option input[type="radio"]:checked::after {
+		content: '';
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 5px;
+		height: 5px;
+		background: white;
+		border-radius: 50%;
+	}
+
+	/* 検索結果のハイライト */
+	.search-highlight {
+		background: var(--accent-primary);
+		color: white;
+		padding: 0 2px;
+		border-radius: 2px;
+		font-weight: bold;
 	}
 
 	/* ドラッグ&ドロップオーバーレイ */
