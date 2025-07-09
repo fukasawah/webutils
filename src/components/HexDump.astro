@@ -103,6 +103,9 @@
 					</div>
 				</div>
 			</div>
+			<div class="canvas-scroll-info">
+				<span id="canvas-offset-info">Canvas: 0x00000000</span>
+			</div>
 		</div>
 	</div>
 
@@ -149,6 +152,9 @@
 	) as HTMLSpanElement;
 	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
 	
+	// Canvas専用のDOM要素
+	const canvasOffsetInfo = document.getElementById("canvas-offset-info") as HTMLSpanElement;
+	
 	// 検索関連の要素
 	const searchInput = document.getElementById("search-input") as HTMLInputElement;
 	const searchToggleBtn = document.getElementById("search-toggle-btn") as HTMLButtonElement;
@@ -165,6 +171,14 @@
 	let lastUpdateOffset = -1;
 	let dragCounter = 0; // ドラッグイベントの重複防止
 	
+	// Canvas専用の状態変数
+	let canvasCurrentOffset = 0;
+	let lastCanvasUpdateOffset = -1;
+	
+	// 双方向同期制御用フラグ
+	let isSyncingToCanvas = false;
+	let isSyncingToHexDump = false;
+	
 	// 検索関連の状態変数
 	let isSearching = false;
 	let searchResultOffset = -1;
@@ -175,7 +189,11 @@
 	const CANVAS_BYTES_PER_LINE = 256;
 	let LINES_TO_DISPLAY = 50; // 動的に変更される
 	let CHUNK_SIZE = LINES_TO_DISPLAY * BYTES_PER_LINE; // 表示用チャンクサイズ
-	const CANVAS_CHUNK_SIZE = 400 * CANVAS_BYTES_PER_LINE; // Canvas用チャンクサイズ
+	
+	// Canvas専用の設定
+	let CANVAS_LINES_TO_DISPLAY = 400; // Canvas表示行数（ピクセル高に対応）
+	let CANVAS_CHUNK_SIZE = CANVAS_LINES_TO_DISPLAY * CANVAS_BYTES_PER_LINE; // Canvas用チャンクサイズ
+	
 	const MIN_THUMB_HEIGHT = 20; // 最小サムの高さ（px）
 	const MIN_LINES = 10; // 最小表示行数
 	const MAX_LINES = 100; // 最大表示行数
@@ -241,6 +259,22 @@
 		console.log(
 			`Updated display lines: ${LINES_TO_DISPLAY}, chunk size: ${CHUNK_SIZE}`,
 		);
+	}
+
+	// 双方向同期用のオフセット変換関数
+	function hexDumpOffsetToCanvasOffset(hexOffset: number): number {
+		// HexDumpオフセット（16バイト境界）をCanvas中心位置（256バイト境界）に変換
+		// Canvasの中央にHexDumpの位置が来るように調整
+		const canvasHalfHeight = CANVAS_LINES_TO_DISPLAY / 2;
+		const targetCanvasLine = Math.floor(hexOffset / CANVAS_BYTES_PER_LINE);
+		const centeredCanvasOffset = Math.max(0, (targetCanvasLine - canvasHalfHeight)) * CANVAS_BYTES_PER_LINE;
+		return Math.floor(centeredCanvasOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+	}
+
+	function canvasOffsetToHexDumpOffset(canvasOffset: number): number {
+		// CanvasオフセットをHexDumpオフセット（16バイト境界）に変換
+		// Canvasの先頭行に対応するHexDumpオフセット
+		return Math.floor(canvasOffset / BYTES_PER_LINE) * BYTES_PER_LINE;
 	}
 
 
@@ -374,6 +408,64 @@
 		return { thumbHeight, thumbPosition, visible: true };
 	}
 
+	// Canvas専用のスクロール関数群
+	function getCanvasMaxOffset(): number {
+		if (!totalFileSize || totalFileSize <= CANVAS_CHUNK_SIZE) {
+			return 0;
+		}
+		
+		// Canvasの最後のバイトが含まれる行の開始オフセット
+		const lastByteOffset = totalFileSize - 1;
+		const lastLineStartOffset = Math.floor(lastByteOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		return Math.max(0, lastLineStartOffset);
+	}
+
+
+	function updateCanvasScrollInfo(offset: number): void {
+		canvasOffsetInfo.textContent = `Canvas: 0x${offset.toString(16).padStart(8, "0").toUpperCase()}`;
+	}
+
+	async function updateCanvasDisplay(): Promise<void> {
+		if (!currentFile || lastCanvasUpdateOffset === canvasCurrentOffset) {
+			return;
+		}
+
+		lastCanvasUpdateOffset = canvasCurrentOffset;
+
+		try {
+			// Canvas用のチャンクを読み込み（HexDump表示とは独立）
+			const canvasBuffer = await loadChunk(
+				canvasCurrentOffset,
+				CANVAS_CHUNK_SIZE,
+			);
+			if (canvasBuffer) {
+				drawCanvas(canvasBuffer);
+				canvas.classList.add("loaded");
+			}
+
+			// Canvas用スクロール情報を更新
+			updateCanvasScrollInfo(canvasCurrentOffset);
+			
+			// CanvasからHexDumpへの同期（無限ループ防止）
+			if (!isSyncingToCanvas) {
+				isSyncingToHexDump = true;
+				const newHexDumpOffset = canvasOffsetToHexDumpOffset(canvasCurrentOffset);
+				if (newHexDumpOffset !== currentOffset) {
+					currentOffset = newHexDumpOffset;
+					await updateDisplay();
+				}
+				isSyncingToHexDump = false;
+			}
+
+		} catch (error) {
+			console.error("Error updating canvas display:", error);
+		}
+	}
+
+	// Canvas表示更新のthrottled版（同期時の負荷軽減）
+	const throttledUpdateCanvasDisplay = throttle(updateCanvasDisplay, 100);
+
 	function updateScrollbarAppearance(): void {
 		const { thumbHeight, thumbPosition, visible } =
 			calculateScrollbarDimensions();
@@ -386,6 +478,7 @@
 			customScrollbar.classList.add("hidden");
 		}
 	}
+
 
 	function generateHexDump(buffer: ArrayBuffer, fileOffset: number): string {
 		const bytes = new Uint8Array(buffer);
@@ -501,22 +594,23 @@
 				hexOutput.innerHTML = hexDump; // HTMLとして表示
 			}
 
-			// Canvas用のチャンクを読み込み（より大きなチャンク）
-			setLoadingState(true, "Rendering canvas...");
-			const canvasBuffer = await loadChunk(
-				currentOffset,
-				CANVAS_CHUNK_SIZE,
-			);
-			if (canvasBuffer) {
-				drawCanvas(canvasBuffer);
-				canvas.classList.add("loaded");
-			}
-
 			// スクロール情報を更新
 			const maxOffset = getMaxOffset();
 			const percentage = maxOffset > 0 ? (currentOffset / maxOffset) * 100 : 0;
 			updateScrollInfo(Math.min(percentage, 100), currentOffset);
 			updateScrollbarAppearance();
+			
+			
+			// HexDumpからCanvasへの同期（無限ループ防止）
+			if (!isSyncingToHexDump) {
+				isSyncingToCanvas = true;
+				const newCanvasOffset = hexDumpOffsetToCanvasOffset(currentOffset);
+				if (newCanvasOffset !== canvasCurrentOffset) {
+					canvasCurrentOffset = newCanvasOffset;
+					await updateCanvasDisplay();
+				}
+				isSyncingToCanvas = false;
+			}
 		} catch (error) {
 			console.error("Error updating display:", error);
 			setLoadingState(false, "Error loading file");
@@ -591,16 +685,47 @@
 		updateDisplay(); // クリック時は即座に更新
 	}
 
+
+	function handleCanvasWheelScroll(event: WheelEvent): void {
+		if (!currentFile || isSearching) return;
+
+		event.preventDefault();
+
+		// Canvas用は画面の約1/3をスクロール（大幅な高速スクロール）
+		const pageScrollLines = Math.floor(CANVAS_LINES_TO_DISPLAY / 3); // 約133行
+		const scrollAmount = pageScrollLines * CANVAS_BYTES_PER_LINE; // 約34,048バイト
+		const maxOffset = getCanvasMaxOffset();
+
+		if (event.deltaY > 0) {
+			// 下スクロール
+			canvasCurrentOffset = Math.min(maxOffset, canvasCurrentOffset + scrollAmount);
+		} else {
+			// 上スクロール
+			canvasCurrentOffset = Math.max(0, canvasCurrentOffset - scrollAmount);
+		}
+
+		// 行境界に調整
+		canvasCurrentOffset = Math.floor(canvasCurrentOffset / CANVAS_BYTES_PER_LINE) * CANVAS_BYTES_PER_LINE;
+		
+		throttledUpdateCanvasDisplay();
+	}
+
 	// ファイル選択をクリア
 	function clearFileSelection(): void {
 		currentFile = null;
 		totalFileSize = 0;
 		currentOffset = 0;
 		lastUpdateOffset = -1; // キャッシュリセット
+		
+		// Canvas状態もリセット
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
+		
 		customScrollbar.classList.add("hidden");
 		hexOutput.textContent = "";
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		updateScrollInfo(0, 0);
+		updateCanvasScrollInfo(0);
 		setLoadingState(false, "Ready");
 		
 		// 検索結果をクリア
@@ -617,6 +742,10 @@
 		totalFileSize = file.size;
 		currentOffset = 0;
 		lastUpdateOffset = -1; // キャッシュリセット
+		
+		// Canvas状態も初期化
+		canvasCurrentOffset = 0;
+		lastCanvasUpdateOffset = -1;
 
 		fileName.textContent = file.name;
 		fileSize.textContent = formatFileSize(file.size);
@@ -633,6 +762,7 @@
 
 		try {
 			await updateDisplay();
+			await updateCanvasDisplay();
 		} catch (error) {
 			console.error("Error reading file:", error);
 			setLoadingState(false, "Error loading file");
@@ -729,8 +859,12 @@
 	scrollbarThumb.addEventListener("mousedown", handleThumbMouseDown);
 	scrollbarTrack.addEventListener("click", handleTrackClick);
 
+
 	// hex-outputエリアのイベントリスナー
 	hexOutput.addEventListener("wheel", handleWheelScroll, { passive: false });
+	
+	// Canvas専用ホイールスクロールイベントリスナー
+	canvas.addEventListener("wheel", handleCanvasWheelScroll, { passive: false });
 
 	// キーボードイベントリスナー（フォーカスが必要）
 	hexOutput.setAttribute("tabindex", "0");
@@ -1356,14 +1490,6 @@
 		max-height: 800px;
 	}
 
-	.canvas-wrapper {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 1rem;
-		margin-top: 1rem;
-	}
 
 	#hex-canvas {
 		border: 1px solid var(--border-primary);
@@ -1406,6 +1532,37 @@
 		font-size: 0.75rem;
 		color: var(--text-muted);
 		font-family: var(--font-mono);
+	}
+
+	/* Canvas専用スクロール情報 */
+	.canvas-wrapper {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 1rem;
+	}
+
+	.canvas-scroll-info {
+		display: flex;
+		justify-content: center;
+		margin-top: 0.5rem;
+		padding: 0.5rem 0;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		flex-shrink: 0;
+		border-top: 1px solid var(--border-secondary);
+	}
+
+	#canvas-offset-info {
+		cursor: pointer;
+		transition: color 0.2s ease;
+	}
+
+	#canvas-offset-info:hover {
+		color: var(--text-primary);
 	}
 
 	/* Status bar */
