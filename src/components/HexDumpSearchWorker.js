@@ -6,25 +6,56 @@
 // - チャンク単位（1MB）でキャンセルチェックを行うため、十分な応答性を確保
 // - ワーカー内でFile.slice()とFileReader APIを使用してファイル読み込みを完結
 
-// バイナリ検索アルゴリズム（Boyer-Moore類似）
+// Boyer-Moore-Horspool高速検索アルゴリズム
 function searchInBuffer(buffer, pattern, startPos = 0) {
     if (pattern.length === 0 || pattern.length > buffer.length) {
         return -1;
     }
 
-    // 簡単なBrute Force検索（小さなパターンに適している）
-    for (let i = startPos; i <= buffer.length - pattern.length; i++) {
-        let found = true;
-        for (let j = 0; j < pattern.length; j++) {
-            if (buffer[i + j] !== pattern[j]) {
-                found = false;
-                break;
+    // パターンが短い場合はBrute Force（オーバーヘッドを避ける）
+    if (pattern.length <= 2) {
+        for (let i = startPos; i <= buffer.length - pattern.length; i++) {
+            let found = true;
+            for (let j = 0; j < pattern.length; j++) {
+                if (buffer[i + j] !== pattern[j]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) {
+                return i;
             }
         }
-        if (found) {
-            return i;
-        }
+        return -1;
     }
+
+    // Boyer-Moore-Horspoolのbad character tableを作成
+    const badCharTable = new Array(256).fill(pattern.length);
+    for (let i = 0; i < pattern.length - 1; i++) {
+        badCharTable[pattern[i]] = pattern.length - 1 - i;
+    }
+
+    // Boyer-Moore-Horspool検索
+    let pos = startPos + pattern.length - 1;
+    while (pos < buffer.length) {
+        let patternPos = pattern.length - 1;
+        let bufferPos = pos;
+        
+        // 後ろから前に向かって比較
+        while (patternPos >= 0 && buffer[bufferPos] === pattern[patternPos]) {
+            patternPos--;
+            bufferPos--;
+        }
+        
+        if (patternPos < 0) {
+            // マッチした
+            return bufferPos + 1;
+        }
+        
+        // bad character tableに基づいてスキップ
+        pos += badCharTable[buffer[pos]];
+    }
+    
     return -1;
 }
 

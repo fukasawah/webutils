@@ -1056,9 +1056,18 @@
 				statusMessage.classList.remove('loading');
 				statusMessage.classList.add('success');
 				
-				// 結果の位置にジャンプ
+				// 結果の位置にジャンプしてからfinishSearchを呼ぶ
 				jumpToOffset(data.offset);
-				finishSearch();
+				
+				// 検索状態をクリア（ハイライトは残す）
+				isSearching = false;
+				updateSearchButtonState();
+				
+				// 3秒後にステータスをリセット
+				setTimeout(() => {
+					statusMessage.textContent = 'Ready';
+					statusMessage.classList.remove('success', 'warning', 'error');
+				}, 3000);
 				break;
 				
 			case 'not_found':
@@ -1119,6 +1128,9 @@
 			return;
 		}
 
+		// 前回の検索結果をクリア（新しい検索開始時のみ）
+		searchResultOffset = -1;
+		
 		// 検索状態を設定
 		isSearching = true;
 		searchPattern = pattern;
@@ -1127,6 +1139,9 @@
 		updateSearchButtonState();
 		statusMessage.textContent = 'Searching...';
 		statusMessage.classList.add('loading');
+		
+		// 表示を更新してハイライトをクリア
+		updateDisplay();
 
 		// Web Workerに検索を依頼（ファイルオブジェクト含む）
 		searchWorker.postMessage({
@@ -1135,7 +1150,7 @@
 				file: currentFile, // ファイルオブジェクトを直接送信
 				pattern: Array.from(pattern), // Uint8Arrayを配列に変換
 				startOffset: currentOffset,
-				chunkSize: 1024 * 1024 // 1MB chunks
+				chunkSize: 4 * 1024 * 1024 // 4MB chunks（I/O効率向上）
 			}
 		});
 	}
@@ -1604,13 +1619,14 @@
 		border-radius: 50%;
 	}
 
-	/* 検索結果のハイライト */
-	.search-highlight {
-		background: var(--accent-primary);
+	/* 検索結果のハイライト - 動的HTML用にグローバル */
+	:global(.search-highlight) {
+		background: #ff6b35;
 		color: white;
 		padding: 0 2px;
 		border-radius: 2px;
 		font-weight: bold;
+		box-shadow: 0 0 3px rgba(255, 107, 53, 0.5);
 	}
 
 	/* ドラッグ&ドロップオーバーレイ */
