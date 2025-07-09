@@ -167,9 +167,9 @@
 	
 	// 検索関連の状態変数
 	let isSearching = false;
-	let searchAbortController: AbortController | null = null;
 	let searchResultOffset = -1;
 	let searchPattern: Uint8Array | null = null;
+	let searchWorker: Worker | null = null;
 	
 	const BYTES_PER_LINE = 16;
 	const CANVAS_BYTES_PER_LINE = 256;
@@ -252,12 +252,52 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 	}
 
+	// パフォーマンス向上のための16進数変換テーブル
+	// 0x00-0xFF (0-255) の全てのバイト値を事前に16進数文字列に変換
+	const HEX_TABLE = Array.from({ length: 256 }, (_, i) => 
+		i.toString(16).padStart(2, "0").toUpperCase()
+	);
+
+	// HTML参照文字化テーブル（セキュリティ強化）
+	// HTMLインジェクション攻撃を防ぐため、特殊文字を参照文字でエスケープ
+	const CHAR_TABLE = (() => {
+		const table = new Array(256);
+		for (let i = 0; i < 256; i++) {
+			if (i >= 0x20 && i <= 0x7e) {
+				// 印字可能ASCII文字だが、HTMLの特殊文字はエスケープ
+				switch (i) {
+					case 0x3C: // < (less than)
+						table[i] = "&lt;";
+						break;
+					case 0x3E: // > (greater than)
+						table[i] = "&gt;";
+						break;
+					case 0x26: // & (ampersand)
+						table[i] = "&amp;";
+						break;
+					case 0x22: // " (double quote)
+						table[i] = "&quot;";
+						break;
+					case 0x27: // ' (single quote)
+						table[i] = "&#x27;";
+						break;
+					default:
+						table[i] = String.fromCharCode(i);
+				}
+			} else {
+				// 非印字文字は全て . (dot) で表示
+				table[i] = ".";
+			}
+		}
+		return table;
+	})();
+
 	function byteToHex(byte: number): string {
-		return byte.toString(16).padStart(2, "0").toUpperCase();
+		return HEX_TABLE[byte];
 	}
 
 	function byteToChar(byte: number): string {
-		return byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : ".";
+		return CHAR_TABLE[byte];
 	}
 
 
@@ -350,7 +390,6 @@
 	function generateHexDump(buffer: ArrayBuffer, fileOffset: number): string {
 		const bytes = new Uint8Array(buffer);
 		let output = "";
-
 		for (let i = 0; i < bytes.length; i += BYTES_PER_LINE) {
 			const actualOffset = fileOffset + i;
 			const lineOffset = actualOffset
@@ -374,6 +413,7 @@
 						const searchEnd = searchResultOffset + searchPattern.length - 1;
 						if (currentByteOffset >= searchResultOffset && currentByteOffset <= searchEnd) {
 							hexByte = `<span class="search-highlight">${hexByte}</span>`;
+							// textByteは既にHTML参照文字化済みなので、そのままハイライト
 							textByte = `<span class="search-highlight">${textByte}</span>`;
 						}
 					}
@@ -967,95 +1007,88 @@
 	updateSearchPlaceholder();
 	updateSearchButtonState();
 
-	// バイナリ検索アルゴリズム（Boyer-Moore類似）
-	function searchInBuffer(buffer: Uint8Array, pattern: Uint8Array, startPos: number = 0): number {
-		if (pattern.length === 0 || pattern.length > buffer.length) {
-			return -1;
+	// Web Workerを初期化
+	function initializeSearchWorker(): void {
+		if (!searchWorker) {
+			// 同じ階層のWorkerファイルを読み込み
+			const workerScript = new URL('./HexDumpSearchWorker.js', import.meta.url);
+			searchWorker = new Worker(workerScript, { type: 'module' });
+			searchWorker.onmessage = handleWorkerMessage;
+			searchWorker.onerror = (error) => {
+				console.error('HexDump search worker error:', error);
+				statusMessage.textContent = 'Search worker error occurred';
+				statusMessage.classList.add('error');
+				isSearching = false;
+				updateSearchButtonState();
+			};
 		}
-
-		// 簡単なBrute Force検索（小さなパターンに適している）
-		for (let i = startPos; i <= buffer.length - pattern.length; i++) {
-			let found = true;
-			for (let j = 0; j < pattern.length; j++) {
-				if (buffer[i + j] !== pattern[j]) {
-					found = false;
-					break;
-				}
-			}
-			if (found) {
-				return i;
-			}
-		}
-		return -1;
 	}
 
-	// 非同期検索関数
-	async function searchInFile(
-		pattern: Uint8Array,
-		startOffset: number = 0,
-		onProgress?: (progress: number, currentOffset: number) => void
-	): Promise<number> {
-		if (!currentFile) {
-			throw new Error('No file loaded');
-		}
-
-		const SEARCH_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
-		const OVERLAP_SIZE = pattern.length - 1; // パターンがチャンク境界にまたがる場合の重複
-		let searchOffset = startOffset;
-		let previousChunkEnd = new Uint8Array(0);
-
-		while (searchOffset < totalFileSize) {
-			// AbortController でキャンセル可能にする
-			if (searchAbortController?.signal.aborted) {
-				throw new Error('Search aborted');
-			}
-
-			const remainingSize = totalFileSize - searchOffset;
-			const chunkSize = Math.min(SEARCH_CHUNK_SIZE, remainingSize);
-			
-			// チャンクを読み込み
-			const chunk = await loadChunk(searchOffset, chunkSize);
-			if (!chunk) {
+	// Workerからのメッセージを処理
+	function handleWorkerMessage(event: MessageEvent): void {
+		const data = event.data;
+		const type = data.type;
+		
+		switch (type) {
+			case 'progress':
+				statusMessage.textContent = `Searching... ${data.progress.toFixed(1)}%`;
 				break;
-			}
-
-			const chunkData = new Uint8Array(chunk);
-			
-			// 前のチャンクの終端と結合（境界検索用）
-			const searchBuffer = new Uint8Array(previousChunkEnd.length + chunkData.length);
-			searchBuffer.set(previousChunkEnd, 0);
-			searchBuffer.set(chunkData, previousChunkEnd.length);
-
-			// バッファ内でパターンを検索
-			const foundIndex = searchInBuffer(searchBuffer, pattern);
-			if (foundIndex !== -1) {
-				const fileOffset = searchOffset - previousChunkEnd.length + foundIndex;
-				return fileOffset;
-			}
-
-			// 進行状況を報告
-			if (onProgress) {
-				const progress = (searchOffset / totalFileSize) * 100;
-				onProgress(progress, searchOffset);
-			}
-
-			// 次のチャンクのための準備
-			previousChunkEnd = chunkData.slice(Math.max(0, chunkData.length - OVERLAP_SIZE));
-			searchOffset += chunkSize;
-
-			// UIの応答性を保つため、少し待つ
-			await new Promise(resolve => setTimeout(resolve, 1));
+				
+			case 'found':
+				// 検索成功
+				searchResultOffset = data.offset;
+				statusMessage.textContent = `Found at offset 0x${data.offset.toString(16).toUpperCase()}`;
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('success');
+				
+				// 結果の位置にジャンプ
+				jumpToOffset(data.offset);
+				finishSearch();
+				break;
+				
+			case 'not_found':
+				// 見つからなかった
+				statusMessage.textContent = 'Pattern not found';
+				statusMessage.classList.remove('loading');
+				statusMessage.classList.add('warning');
+				finishSearch();
+				break;
+				
+			case 'cancelled':
+				// 検索キャンセル
+				statusMessage.textContent = 'Search cancelled';
+				statusMessage.classList.remove('loading');
+				finishSearch();
+				break;
+				
+			default:
+				console.warn('Unknown worker message type:', type);
 		}
-
-		return -1; // 見つからなかった
 	}
 
-	// 検索実行関数
+
+	// 検索完了処理
+	function finishSearch(): void {
+		isSearching = false;
+		updateSearchButtonState();
+		
+		// 3秒後にステータスをリセット
+		setTimeout(() => {
+			statusMessage.textContent = 'Ready';
+			statusMessage.classList.remove('success', 'warning', 'error');
+		}, 3000);
+	}
+
+	// 初期化時にWorkerを作成
+	initializeSearchWorker();
+
+
+	// 検索実行関数（Web Workerベース）
 	async function executeSearch(): Promise<void> {
 		const input = searchInput.value.trim();
 		const mode = getCurrentSearchMode();
 		
-		if (!input || !currentFile) {
+		if (!input || !currentFile || !searchWorker) {
 			return;
 		}
 
@@ -1073,7 +1106,6 @@
 
 		// 検索状態を設定
 		isSearching = true;
-		searchAbortController = new AbortController();
 		searchPattern = pattern;
 		
 		// UI状態を更新
@@ -1081,56 +1113,24 @@
 		statusMessage.textContent = 'Searching...';
 		statusMessage.classList.add('loading');
 
-		try {
-			// 現在のオフセットから検索開始
-			const startOffset = currentOffset;
-			const foundOffset = await searchInFile(pattern, startOffset, (progress) => {
-				statusMessage.textContent = `Searching... ${progress.toFixed(1)}%`;
-			});
-
-			if (foundOffset !== -1) {
-				// 検索成功
-				searchResultOffset = foundOffset;
-				statusMessage.textContent = `Found at offset 0x${foundOffset.toString(16).toUpperCase()}`;
-				statusMessage.classList.remove('loading');
-				statusMessage.classList.add('success');
-				
-				// 結果の位置にジャンプ
-				jumpToOffset(foundOffset);
-			} else {
-				// 見つからなかった
-				statusMessage.textContent = 'Pattern not found';
-				statusMessage.classList.remove('loading');
-				statusMessage.classList.add('warning');
+		// Web Workerに検索を依頼（ファイルオブジェクト含む）
+		searchWorker.postMessage({
+			type: 'search',
+			data: {
+				file: currentFile, // ファイルオブジェクトを直接送信
+				pattern: Array.from(pattern), // Uint8Arrayを配列に変換
+				startOffset: currentOffset,
+				chunkSize: 1024 * 1024 // 1MB chunks
 			}
-		} catch (error) {
-			if (error instanceof Error && error.message === 'Search aborted') {
-				statusMessage.textContent = 'Search cancelled';
-				statusMessage.classList.remove('loading');
-			} else {
-				console.error('Search error:', error);
-				statusMessage.textContent = 'Search error occurred';
-				statusMessage.classList.remove('loading');
-				statusMessage.classList.add('error');
-			}
-		} finally {
-			// 検索状態をリセット
-			isSearching = false;
-			searchAbortController = null;
-			updateSearchButtonState();
-			
-			// 3秒後にステータスをリセット
-			setTimeout(() => {
-				statusMessage.textContent = 'Ready';
-				statusMessage.classList.remove('success', 'warning', 'error');
-			}, 3000);
-		}
+		});
 	}
 
-	// 検索停止関数
+	// 検索停止関数（Web Workerベース）
 	function stopSearch(): void {
-		if (searchAbortController) {
-			searchAbortController.abort();
+		if (searchWorker && isSearching) {
+			searchWorker.postMessage({
+				type: 'cancel'
+			});
 		}
 	}
 
