@@ -103,9 +103,6 @@
 					</div>
 				</div>
 			</div>
-			<div class="canvas-scroll-info">
-				<span id="canvas-offset-info">Canvas: 0x00000000</span>
-			</div>
 		</div>
 	</div>
 
@@ -152,8 +149,6 @@
 	) as HTMLSpanElement;
 	const dragOverlay = document.getElementById("drag-overlay") as HTMLDivElement;
 	
-	// Canvas専用のDOM要素
-	const canvasOffsetInfo = document.getElementById("canvas-offset-info") as HTMLSpanElement;
 	
 	// 検索関連の要素
 	const searchInput = document.getElementById("search-input") as HTMLInputElement;
@@ -422,9 +417,6 @@
 	}
 
 
-	function updateCanvasScrollInfo(offset: number): void {
-		canvasOffsetInfo.textContent = `Canvas: 0x${offset.toString(16).padStart(8, "0").toUpperCase()}`;
-	}
 
 	async function updateCanvasDisplay(): Promise<void> {
 		if (!currentFile || lastCanvasUpdateOffset === canvasCurrentOffset) {
@@ -444,8 +436,6 @@
 				canvas.classList.add("loaded");
 			}
 
-			// Canvas用スクロール情報を更新
-			updateCanvasScrollInfo(canvasCurrentOffset);
 			
 			// CanvasからHexDumpへの同期（無限ループ防止）
 			if (!isSyncingToCanvas) {
@@ -725,7 +715,6 @@
 		hexOutput.textContent = "";
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		updateScrollInfo(0, 0);
-		updateCanvasScrollInfo(0);
 		setLoadingState(false, "Ready");
 		
 		// 検索結果をクリア
@@ -1534,7 +1523,7 @@
 		font-family: var(--font-mono);
 	}
 
-	/* Canvas専用スクロール情報 */
+	/* Canvas専用スタイル */
 	.canvas-wrapper {
 		flex: 1;
 		display: flex;
@@ -1542,27 +1531,6 @@
 		align-items: center;
 		gap: 1rem;
 		margin-top: 1rem;
-	}
-
-	.canvas-scroll-info {
-		display: flex;
-		justify-content: center;
-		margin-top: 0.5rem;
-		padding: 0.5rem 0;
-		font-size: 0.75rem;
-		color: var(--text-secondary);
-		font-family: var(--font-mono);
-		flex-shrink: 0;
-		border-top: 1px solid var(--border-secondary);
-	}
-
-	#canvas-offset-info {
-		cursor: pointer;
-		transition: color 0.2s ease;
-	}
-
-	#canvas-offset-info:hover {
-		color: var(--text-primary);
 	}
 
 	/* Status bar */
