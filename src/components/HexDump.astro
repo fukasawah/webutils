@@ -1031,7 +1031,22 @@
 		
 		switch (type) {
 			case 'progress':
-				statusMessage.textContent = `Searching... ${data.progress.toFixed(1)}%`;
+				// 推定残り時間を分かりやすく表示
+				const remainingSeconds = Math.ceil(data.estimatedRemainingMs / 1000);
+				let timeText = '';
+				
+				if (remainingSeconds < 60) {
+					timeText = `~${remainingSeconds}s`;
+				} else if (remainingSeconds < 3600) {
+					const minutes = Math.ceil(remainingSeconds / 60);
+					timeText = `~${minutes}m`;
+				} else {
+					const hours = Math.floor(remainingSeconds / 3600);
+					const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+					timeText = `~${hours}h${minutes}m`;
+				}
+				
+				statusMessage.textContent = `Searching... ${data.progress.toFixed(1)}% (${timeText} remaining)`;
 				break;
 				
 			case 'found':

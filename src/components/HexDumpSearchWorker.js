@@ -58,6 +58,10 @@ async function handleSearchRequest(data) {
     const OVERLAP_SIZE = patternArray.length - 1;
     let searchOffset = startOffset;
     let previousChunkEnd = new Uint8Array(0);
+    
+    // スループット計算用の変数
+    const searchStartTime = Date.now();
+    let totalBytesProcessed = 0;
 
     while (searchOffset < fileSize) {
         // 検索キャンセルチェック
@@ -94,12 +98,23 @@ async function handleSearchRequest(data) {
             return;
         }
 
-        // 進行状況を報告
+        // 進行状況と推定残り時間を計算して報告
+        totalBytesProcessed += currentChunkSize;
+        const elapsedMs = Date.now() - searchStartTime;
+        const throughputBytesPerSec = elapsedMs > 0 ? (totalBytesProcessed / elapsedMs) * 1000 : 0;
         const progress = (searchOffset / fileSize) * 100;
+        
+        // 推定残り時間を計算
+        const remainingBytes = fileSize - searchOffset;
+        const estimatedRemainingMs = throughputBytesPerSec > 0 ? (remainingBytes / throughputBytesPerSec) * 1000 : 0;
+        
         self.postMessage({
             type: 'progress',
             progress: progress,
-            currentOffset: searchOffset
+            currentOffset: searchOffset,
+            throughputBytesPerSec: throughputBytesPerSec,
+            estimatedRemainingMs: estimatedRemainingMs,
+            elapsedMs: elapsedMs
         });
 
         // 次のチャンクのための準備
@@ -115,7 +130,7 @@ async function handleSearchRequest(data) {
 
 // ワーカー内でファイルチャンクを読み込む関数
 function readFileChunk(file, offset, size) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         try {
             // File.slice()でチャンクを作成
             const chunk = file.slice(offset, offset + size);
