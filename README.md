@@ -1,16 +1,17 @@
-# Astro Starter Kit: Basics
+# Web Toolbox
 
-```sh
-npm create astro@latest -- --template basics
-```
+ブラウザで動作する実用的なWebツール集です。外部サービスに依存せず、Web標準APIを活用したクライアントサイドツールを提供します。
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/basics)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/basics)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/basics/devcontainer.json)
+## 🎯 プロジェクトの目的
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+- **プライバシー重視**: 全ての処理をブラウザ内で完結、データは外部に送信されません
+- **オフライン対応**: インターネット接続なしでも利用可能
+- **軽量**: 外部依存を最小限に抑え、高速な動作を実現
+- **使いやすさ**: 直感的なUIで誰でも簡単に利用可能
 
-![just-the-basics](https://github.com/withastro/astro/assets/2244813/a0a5533c-a856-4198-8470-2d67b1d7c554)
+## 🤖 開発について
+
+このプロジェクトは**Claude Code**を使用して実装されています。AI支援により効率的な開発を行い、Web標準に準拠した高品質なツールを提供しています。
 
 ## 🚀 Project Structure
 
