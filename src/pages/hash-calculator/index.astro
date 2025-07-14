@@ -1,0 +1,1081 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import FileInput from "../../components/common/FileInput.astro";
+---
+
+<Layout title="Hash Calculator - Web Toolbox" currentTool="hash-calculator">
+	<div class="tool-container">
+		<div class="tool-header">
+			<h1>🔐 Hash Calculator</h1>
+			<p>
+				Calculate hash values from text or files using various
+				algorithms and output in HEX format
+			</p>
+		</div>
+
+		<div class="glass-card tool-controls">
+			<div class="control-section">
+				<h3>Hash Algorithm</h3>
+				<div class="algorithm-grid" id="algorithm-grid">
+					<label class="algorithm-option">
+						<input type="radio" name="algorithm" value="SHA-1" />
+						<span>SHA-1</span>
+						<div class="algorithm-indicators">
+							<span class="indicator js">JS</span>
+							<span class="indicator wasm">WASM</span>
+						</div>
+					</label>
+					<label class="algorithm-option">
+						<input type="radio" name="algorithm" value="SHA-256" checked />
+						<span>SHA-256</span>
+						<div class="algorithm-indicators">
+							<span class="indicator js">JS</span>
+							<span class="indicator wasm">WASM</span>
+						</div>
+					</label>
+					<label class="algorithm-option">
+						<input type="radio" name="algorithm" value="SHA-384" />
+						<span>SHA-384</span>
+						<div class="algorithm-indicators">
+							<span class="indicator js">JS</span>
+							<span class="indicator wasm">WASM</span>
+						</div>
+					</label>
+					<label class="algorithm-option">
+						<input type="radio" name="algorithm" value="SHA-512" />
+						<span>SHA-512</span>
+						<div class="algorithm-indicators">
+							<span class="indicator js">JS</span>
+							<span class="indicator wasm">WASM</span>
+						</div>
+					</label>
+					<label class="algorithm-option">
+						<input type="radio" name="algorithm" value="MD5" />
+						<span>MD5</span>
+						<div class="algorithm-indicators">
+							<span class="indicator wasm">WASM</span>
+						</div>
+					</label>
+				</div>
+			</div>
+
+			<div class="control-section">
+				<h3>Performance Mode</h3>
+				<div class="performance-options">
+					<label class="performance-option">
+						<input
+							type="radio"
+							name="worker-type"
+							value="wasm"
+							checked
+						/>
+						<span>🚀 WASM (High Performance)</span>
+						<small id="wasm-status">Checking availability...</small>
+					</label>
+					<label class="performance-option">
+						<input type="radio" name="worker-type" value="js" />
+						<span>⚡ JavaScript (Compatible)</span>
+						<small>Always available</small>
+					</label>
+				</div>
+			</div>
+
+			<div class="control-section">
+				<h3>Input Method</h3>
+				<div class="input-method-tabs">
+					<button class="tab-btn active" data-tab="text"
+						>📝 Text Input</button
+					>
+					<button class="tab-btn" data-tab="file"
+						>📁 File Input</button
+					>
+				</div>
+			</div>
+
+			<div class="tab-content active" id="text-tab">
+				<div class="control-group">
+					<label for="text-input">Text to Hash</label>
+					<textarea
+						id="text-input"
+						class="text-input"
+						placeholder="Enter text to calculate hash..."
+						rows="4"></textarea>
+				</div>
+			</div>
+
+			<div class="tab-content" id="file-tab">
+				<FileInput
+					id="file-input"
+					accept="*/*"
+					label="📁 Choose File"
+				/>
+				<div class="file-info">
+					<span id="file-status">No file selected</span>
+				</div>
+			</div>
+
+			<div class="control-section">
+				<button id="calculate-btn" class="btn btn-primary">
+					<span id="calculate-text">Calculate Hash</span>
+				</button>
+			</div>
+		</div>
+
+		<div class="glass-card tool-results">
+			<div class="result-header">
+				<h3>Hash Results</h3>
+				<button id="copy-btn" class="btn btn-success" disabled>
+					<span>Copy Hash</span>
+				</button>
+			</div>
+			<div class="result-content">
+				<div class="hash-result">
+					<div class="algorithm-label" id="result-algorithm">
+						SHA-256
+					</div>
+					<div class="hash-value" id="hash-output">
+						Hash result will appear here...
+					</div>
+				</div>
+				<div class="input-info" id="input-info"></div>
+			</div>
+		</div>
+
+		<div id="progress-overlay" class="progress-overlay hidden">
+			<div class="progress-content">
+				<div class="progress-spinner"></div>
+				<div class="progress-text">Calculating hash...</div>
+				<div class="progress-info" id="progress-info"></div>
+				<button
+					id="overlay-cancel-btn"
+					class="btn btn-danger progress-cancel-btn"
+				>
+					<span>Cancel</span>
+				</button>
+			</div>
+		</div>
+	</div>
+</Layout>
+
+<script>
+	// Import unified worker directly
+	import UnifiedHashWorker from "./_hash-worker-unified.js?worker";
+
+	// DOM elements
+	const algorithmGrid = document.getElementById(
+		"algorithm-grid",
+	) as HTMLDivElement;
+	const tabButtons = document.querySelectorAll(
+		".tab-btn",
+	) as NodeListOf<HTMLButtonElement>;
+	const tabContents = document.querySelectorAll(
+		".tab-content",
+	) as NodeListOf<HTMLDivElement>;
+	const textInput = document.getElementById(
+		"text-input",
+	) as HTMLTextAreaElement;
+	const fileInput = document.getElementById("file-input") as HTMLInputElement;
+	const fileStatus = document.getElementById(
+		"file-status",
+	) as HTMLSpanElement;
+	const calculateBtn = document.getElementById(
+		"calculate-btn",
+	) as HTMLButtonElement;
+	const calculateText = document.getElementById(
+		"calculate-text",
+	) as HTMLSpanElement;
+	const overlayCancelBtn = document.getElementById(
+		"overlay-cancel-btn",
+	) as HTMLButtonElement;
+	const copyBtn = document.getElementById("copy-btn") as HTMLButtonElement;
+	const hashOutput = document.getElementById("hash-output") as HTMLDivElement;
+	const resultAlgorithm = document.getElementById(
+		"result-algorithm",
+	) as HTMLDivElement;
+	const inputInfo = document.getElementById("input-info") as HTMLDivElement;
+	const progressOverlay = document.getElementById(
+		"progress-overlay",
+	) as HTMLDivElement;
+	const progressInfo = document.getElementById(
+		"progress-info",
+	) as HTMLDivElement;
+	const wasmStatus = document.getElementById("wasm-status") as HTMLElement;
+
+	// Algorithm support mapping
+	const ALGORITHM_SUPPORT = {
+		"SHA-1": { js: true, wasm: true },
+		"SHA-256": { js: true, wasm: true },
+		"SHA-384": { js: true, wasm: true },
+		"SHA-512": { js: true, wasm: true },
+		"MD5": { js: false, wasm: true },
+	};
+
+	// State
+	let currentFile: File | null = null;
+	let isCalculating = false;
+	let worker: Worker | null = null;
+	let wasmSupported = false;
+
+	let startTime: number;
+	let lastProgressTime: number = 0;
+	let lastProgressBytes: number = 0;
+	let WINDOW_SIZE = 5000; // 5 seconds for throughput calculation
+
+	// Initialize the application
+	async function initializeApp() {
+		console.log("Initializing Hash Calculator...");
+
+		try {
+			// Create unified worker
+			worker = new UnifiedHashWorker();
+
+			// Set up message handlers
+			worker.onmessage = handleWorkerMessage;
+			worker.onerror = (error) => handleWorkerError(error, "unified");
+
+			// Initialize worker with WASM preference
+			worker.postMessage({ type: "init", data: { preferWasm: true } });
+
+			console.log("Hash Calculator initialized successfully");
+		} catch (error) {
+			console.error("Failed to initialize Hash Calculator:", error);
+			updateWorkerStatus({ jsSupported: false, wasmSupported: false });
+		}
+	}
+
+	function updateWorkerStatus(status: any) {
+		// Update WASM status indicator
+		if (status.wasmSupported) {
+			wasmStatus.textContent = "Available";
+			wasmStatus.className = "status-available";
+		} else {
+			wasmStatus.textContent = "Not available";
+			wasmStatus.className = "status-muted";
+
+			// Disable WASM option and select JS
+			const wasmRadio = document.querySelector(
+				'input[name="worker-type"][value="wasm"]',
+			) as HTMLInputElement;
+			const jsRadio = document.querySelector(
+				'input[name="worker-type"][value="js"]',
+			) as HTMLInputElement;
+
+			if (wasmRadio && jsRadio) {
+				wasmRadio.disabled = true;
+				jsRadio.checked = true;
+			}
+		}
+	}
+
+
+	function getSelectedAlgorithm(): string {
+		const selected = document.querySelector(
+			'input[name="algorithm"]:checked',
+		) as HTMLInputElement;
+		return selected?.value || "SHA-256";
+	}
+
+	function getSelectedWorkerType(): string {
+		const selected = document.querySelector(
+			'input[name="worker-type"]:checked',
+		) as HTMLInputElement;
+		return selected?.value || "js";
+	}
+
+	function updateWorkerOptions() {
+		const selectedAlgorithm = getSelectedAlgorithm();
+		const wasmRadio = document.querySelector(
+			'input[name="worker-type"][value="wasm"]',
+		) as HTMLInputElement;
+		const jsRadio = document.querySelector(
+			'input[name="worker-type"][value="js"]',
+		) as HTMLInputElement;
+		const wasmLabel = wasmRadio?.parentElement as HTMLElement;
+		const jsLabel = jsRadio?.parentElement as HTMLElement;
+
+		if (!wasmRadio || !jsRadio || !wasmLabel || !jsLabel) return;
+
+		// Check algorithm support
+		const algorithmSupport = ALGORITHM_SUPPORT[selectedAlgorithm as keyof typeof ALGORITHM_SUPPORT];
+		const algorithmWasmSupported = algorithmSupport?.wasm ?? false;
+		const algorithmJsSupported = algorithmSupport?.js ?? false;
+
+		// Update WASM option
+		const wasmAvailable = wasmSupported && algorithmWasmSupported;
+		wasmRadio.disabled = !wasmAvailable;
+		wasmLabel.classList.toggle("disabled", !wasmAvailable);
+		wasmLabel.classList.toggle("ui-option-disabled", !wasmAvailable);
+
+		// Update JS option
+		jsRadio.disabled = !algorithmJsSupported;
+		jsLabel.classList.toggle("disabled", !algorithmJsSupported);
+		jsLabel.classList.toggle("ui-option-disabled", !algorithmJsSupported);
+
+		// Auto-switch to available worker if current selection is disabled
+		const currentWorkerType = getSelectedWorkerType();
+		if (
+			currentWorkerType === "wasm" &&
+			!wasmAvailable &&
+			algorithmJsSupported
+		) {
+			jsRadio.checked = true;
+		} else if (
+			currentWorkerType === "js" &&
+			!algorithmJsSupported &&
+			wasmAvailable
+		) {
+			wasmRadio.checked = true;
+		}
+
+		// Update status indicators
+		const wasmStatusEl = wasmLabel.querySelector("small");
+		if (wasmStatusEl) {
+			if (!wasmSupported) {
+				wasmStatusEl.textContent = "WASM not available";
+				wasmStatusEl.className = "status-muted";
+			} else if (!algorithmWasmSupported) {
+				wasmStatusEl.textContent = "Not supported for this algorithm";
+				wasmStatusEl.className = "status-error";
+			} else {
+				wasmStatusEl.textContent = "Available";
+				wasmStatusEl.className = "status-available";
+			}
+		}
+	}
+
+	function getActiveTab(): string {
+		const activeTab = document.querySelector(
+			".tab-btn.active",
+		) as HTMLButtonElement;
+		return activeTab?.dataset.tab || "text";
+	}
+
+	function switchTab(tabName: string): void {
+		tabButtons.forEach((btn) => {
+			btn.classList.toggle("active", btn.dataset.tab === tabName);
+		});
+
+		tabContents.forEach((content) => {
+			content.classList.toggle("active", content.id === `${tabName}-tab`);
+		});
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes === 0) return "0 Bytes";
+		const k = 1024;
+		const sizes = ["Bytes", "KB", "MB", "GB"];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+	}
+
+
+	function handleWorkerMessage(event: MessageEvent): void {
+		const data = event.data;
+		const type = data.type;
+
+		switch (type) {
+			case "initialized":
+				wasmSupported = data.mode && data.mode.includes("WASM");
+				updateWorkerStatus({
+					wasmSupported: wasmSupported,
+					jsSupported: true,
+				});
+				updateWorkerOptions();
+				break;
+
+			case "progress":
+				const { processed, total } = data;
+				const progressPercent = (processed / total) * 100;
+
+				const currentTime = Date.now();
+				const durationForThroughput = currentTime - lastProgressTime;
+				const throughputBytesPerSec =
+					(processed - lastProgressBytes) /
+					(durationForThroughput / 1000); // bytes per second
+
+				if (durationForThroughput >= WINDOW_SIZE) {
+					lastProgressTime = currentTime;
+					lastProgressBytes = processed;
+				}
+
+				const throughput = formatFileSize(throughputBytesPerSec);
+				progressInfo.textContent = `Processing: ${progressPercent.toFixed(1)}% ${throughput}/s`;
+				break;
+
+			case "completed":
+				const hashValue = data.hash.toUpperCase();
+				const mode = data.mode || "JavaScript";
+
+				resultAlgorithm.textContent = data.algorithm;
+				hashOutput.textContent = hashValue;
+
+				if (data.inputType === "text") {
+					inputInfo.textContent = `Text input (${data.inputLength} characters) - Calculated using ${mode}`;
+				} else {
+					const processingTime = (data.processingTime / 1000).toFixed(
+						2,
+					);
+					inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${processingTime}s using ${mode}`;
+				}
+				copyBtn.disabled = false;
+				finishCalculation();
+				break;
+
+			case "hash_complete":
+				const fileHashValue = data.hash.toUpperCase();
+				const fileMode = data.mode || "JavaScript";
+				const fileProcessingTime = (data.processingTime / 1000).toFixed(
+					2,
+				);
+
+				resultAlgorithm.textContent = data.algorithm;
+				hashOutput.textContent = fileHashValue;
+				inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${fileProcessingTime}s using ${fileMode}`;
+				copyBtn.disabled = false;
+				finishCalculation();
+				break;
+
+			case "cancelled":
+				hashOutput.textContent = "Calculation cancelled";
+				inputInfo.textContent = "Operation was cancelled";
+				finishCalculation();
+				break;
+
+			case "error":
+				console.error("Hash calculation error:", data.message);
+				hashOutput.textContent = "Error calculating hash";
+				inputInfo.textContent = "Calculation failed: " + data.message;
+				finishCalculation();
+				break;
+
+			default:
+				console.warn("Unknown worker message type:", type);
+		}
+	}
+
+	function handleWorkerError(error: any, workerType: string): void {
+		console.error(`Hash worker error [${workerType}]:`, error);
+		isCalculating = false;
+		calculateBtn.disabled = false;
+		calculateText.textContent = "Calculate Hash";
+		progressOverlay.classList.add("hidden");
+		hashOutput.textContent = "Worker error occurred";
+		inputInfo.textContent = `${workerType} worker error - please try again`;
+	}
+
+	async function calculateTextHash(
+		text: string,
+		algorithm: string,
+	): Promise<void> {
+		if (!worker) {
+			throw new Error("Worker not initialized");
+		}
+
+		const preferWasm = getSelectedWorkerType() === "wasm";
+		worker.postMessage({
+			type: "calculate",
+			data: { algorithm, text, preferWasm },
+		});
+	}
+
+	async function calculateFileHash(
+		file: File,
+		algorithm: string,
+		useWasm: boolean,
+	): Promise<void> {
+		if (!worker) {
+			throw new Error("Worker not initialized");
+		}
+
+		const CHUNK_SIZE = 16 * 1024 * 1024; // 8MB chunks
+
+		try {
+			// Start calculation with file
+			worker.postMessage({
+				type: "start_calculation",
+				data: {
+					file,
+					algorithm,
+					useWasm,
+					chunkSize: CHUNK_SIZE,
+				},
+			});
+		} catch (error) {
+			console.error("File hash calculation failed:", error);
+			throw error;
+		}
+	}
+
+	function finishCalculation(): void {
+		isCalculating = false;
+		calculateBtn.disabled = false;
+		calculateText.textContent = "Calculate Hash";
+		progressOverlay.classList.add("hidden");
+	}
+
+	async function calculateHash(): Promise<void> {
+		if (isCalculating) return;
+
+		const algorithm = getSelectedAlgorithm();
+		const activeTab = getActiveTab();
+
+		if (activeTab === "text") {
+			// Text processing will be handled below
+		} else {
+			if (!currentFile) {
+				alert("Please select a file to hash");
+				return;
+			}
+		}
+
+		isCalculating = true;
+		calculateBtn.disabled = true;
+		calculateText.textContent = "Calculating...";
+		progressOverlay.classList.remove("hidden");
+		copyBtn.disabled = true;
+
+		const useWasm =
+			!!(
+				document.querySelector(
+					'input[name="worker-type"]',
+				) as HTMLInputElement
+			)?.checked;
+
+		startTime = Date.now();
+		lastProgressTime = startTime;
+		lastProgressBytes = 0;
+
+		try {
+			if (activeTab === "text") {
+				const text = textInput.value;
+				progressInfo.textContent = "Processing text...";
+				await calculateTextHash(text, algorithm);
+				// Results are set by Worker message handler
+			} else {
+				// File processing will be handled by Worker messages
+				progressInfo.textContent = "Starting file processing...";
+				await calculateFileHash(currentFile!, algorithm, useWasm);
+				// Results are set by Worker message handler
+			}
+		} catch (error) {
+			console.error("Hash calculation failed:", error);
+			hashOutput.textContent = "Error calculating hash";
+			inputInfo.textContent =
+				"Calculation failed: " + (error as Error).message;
+			finishCalculation();
+		}
+	}
+
+	function stopCalculation(): void {
+		if (!isCalculating) return;
+
+		if (worker) {
+			// Send cancel message to worker
+			worker.postMessage({ type: "cancel" });
+		}
+
+		// For immediate cancellation
+		isCalculating = false;
+		hashOutput.textContent = "Calculation cancelled";
+		inputInfo.textContent = "Operation was cancelled by user";
+		finishCalculation();
+	}
+
+	function copyToClipboard(): void {
+		const hashValue = hashOutput.textContent;
+		if (
+			hashValue &&
+			hashValue !== "Hash result will appear here..." &&
+			hashValue !== "Error calculating hash"
+		) {
+			navigator.clipboard
+				.writeText(hashValue)
+				.then(() => {
+					const originalText = copyBtn.textContent;
+					copyBtn.textContent = "Copied!";
+					copyBtn.classList.add("copied");
+					setTimeout(() => {
+						copyBtn.textContent = originalText;
+						copyBtn.classList.remove("copied");
+					}, 2000);
+				})
+				.catch(() => {
+					alert("Failed to copy hash to clipboard");
+				});
+		}
+	}
+
+	function handleFileChange(): void {
+		const file = fileInput.files?.[0];
+		if (file) {
+			currentFile = file;
+			const fileSizeText = formatFileSize(file.size);
+			fileStatus.textContent = `Selected: ${file.name} (${fileSizeText})`;
+			fileStatus.style.color = "var(--text-secondary)";
+		} else {
+			currentFile = null;
+			fileStatus.textContent = "No file selected";
+			fileStatus.style.color = "var(--text-secondary)";
+		}
+	}
+
+	// Event listeners
+	tabButtons.forEach((btn) => {
+		btn.addEventListener("click", () => {
+			if (!isCalculating) {
+				switchTab(btn.dataset.tab!);
+			}
+		});
+	});
+
+	calculateBtn.addEventListener("click", calculateHash);
+	overlayCancelBtn.addEventListener("click", stopCalculation);
+	copyBtn.addEventListener("click", copyToClipboard);
+	fileInput.addEventListener("change", handleFileChange);
+
+	// Allow Enter key in text input to trigger calculation
+	textInput.addEventListener("keydown", (event) => {
+		if (event.ctrlKey && event.key === "Enter" && !isCalculating) {
+			calculateHash();
+		}
+	});
+
+	// Initialize the application when DOM is loaded
+	document.addEventListener("DOMContentLoaded", initializeApp);
+
+	// Update algorithm label when selection changes (delegated event)
+	algorithmGrid.addEventListener("change", (event) => {
+		const target = event.target as HTMLInputElement;
+		if (target.name === "algorithm") {
+			resultAlgorithm.textContent = target.value;
+			// Update worker options when algorithm changes
+			updateWorkerOptions();
+		}
+	});
+
+	// Update worker options when worker type changes
+	document.addEventListener("change", (event) => {
+		const target = event.target as HTMLInputElement;
+		if (target.name === "worker-type") {
+			updateWorkerOptions();
+		}
+	});
+</script>
+
+<style>
+	.control-section {
+		margin-bottom: 2rem;
+	}
+
+	.control-section:last-child {
+		margin-bottom: 0;
+	}
+
+	.control-section h3 {
+		margin-bottom: 1rem;
+		font-size: 1.1rem;
+		color: var(--text-primary);
+	}
+
+	.algorithm-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+		gap: 1rem;
+	}
+
+	.algorithm-option {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+		padding: 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		transition: all 0.2s ease;
+		font-size: 0.9rem;
+	}
+
+	.algorithm-option:hover {
+		background: var(--bg-card);
+		border-color: var(--accent-primary);
+	}
+
+	.algorithm-option input[type="radio"] {
+		width: 1rem;
+		height: 1rem;
+		appearance: none;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-primary);
+		border-radius: 50%;
+		position: relative;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.algorithm-option input[type="radio"]:checked {
+		background: var(--accent-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.algorithm-option input[type="radio"]:checked::after {
+		content: "";
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 6px;
+		height: 6px;
+		background: white;
+		border-radius: 50%;
+	}
+
+	.algorithm-indicators {
+		display: flex;
+		gap: 0.25rem;
+		margin-top: 0.25rem;
+	}
+
+	.algorithm-indicators .indicator {
+		font-size: 0.6rem;
+		padding: 0.2rem 0.4rem;
+		border-radius: var(--radius-sm);
+		font-weight: 600;
+		text-transform: uppercase;
+		display: inline-block;
+		line-height: 1;
+		border: 1px solid transparent;
+	}
+
+	.algorithm-indicators :global(.indicator.js) {
+		background: #6366f1;
+		color: white;
+		border-color: #6366f1;
+	}
+
+	.algorithm-indicators :global(.indicator.wasm) {
+		background: #3b82f6;
+		color: white;
+		border-color: #3b82f6;
+	}
+
+	.performance-options {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
+	}
+
+	.performance-option {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		cursor: pointer;
+		padding: 0.5rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		transition: all 0.2s ease;
+		font-size: 0.9rem;
+	}
+
+	.performance-option.disabled {
+		/* Use shared disabled style */
+	}
+
+	.performance-option:hover:not(.disabled) {
+		background: var(--bg-card);
+		border-color: var(--border-accent);
+	}
+
+	.performance-option input[type="radio"] {
+		width: 1rem;
+		height: 1rem;
+		appearance: none;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-primary);
+		border-radius: 50%;
+		position: relative;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		margin-right: 0.5rem;
+	}
+
+	.performance-option input[type="radio"]:checked {
+		background: var(--accent-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.performance-option input[type="radio"]:checked::after {
+		content: "";
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: 6px;
+		height: 6px;
+		background: white;
+		border-radius: 50%;
+	}
+
+	.performance-option span {
+		display: flex;
+		align-items: center;
+		font-weight: 500;
+		color: var(--text-primary);
+	}
+
+	.performance-option small {
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		margin-left: 1.5rem;
+	}
+
+	.performance-option input[type="radio"]:disabled + span {
+		color: var(--text-muted);
+		opacity: 0.6;
+	}
+
+	/* Shared disabled/status styles */
+	.status-available {
+		color: var(--accent-success);
+	}
+
+	.status-error {
+		color: var(--accent-error);
+	}
+
+	.status-muted {
+		color: var(--text-muted);
+	}
+
+	.ui-disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		pointer-events: none;
+	}
+
+	.ui-option-disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		background: var(--bg-secondary);
+	}
+
+	/* Legacy support */
+	.worker-status-available {
+		color: var(--accent-success);
+	}
+	.worker-status-error {
+		color: var(--accent-error);
+	}
+	.worker-status-muted {
+		color: var(--text-muted);
+	}
+
+	.input-method-tabs {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.tab-btn {
+		flex: 1;
+		padding: 0.75rem 1rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		color: var(--text-secondary);
+		cursor: pointer;
+		transition: all 0.2s ease;
+		font-size: 0.9rem;
+	}
+
+	.tab-btn.active {
+		background: var(--accent-primary);
+		color: white;
+		border-color: var(--accent-primary);
+	}
+
+	.tab-btn:hover:not(.active) {
+		background: var(--bg-card);
+		color: var(--text-primary);
+	}
+
+	.tab-content {
+		display: none;
+	}
+
+	.tab-content.active {
+		display: block;
+	}
+
+	.text-input {
+		width: 100%;
+		min-height: 120px;
+		padding: 1rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		color: var(--text-primary);
+		font-family: var(--font-mono);
+		font-size: 0.9rem;
+		line-height: 1.5;
+		resize: vertical;
+		transition: all 0.2s ease;
+	}
+
+	.text-input:focus {
+		outline: none;
+		border-color: var(--accent-primary);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+	}
+
+	.text-input::placeholder {
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.file-info {
+		margin-top: 1rem;
+		padding: 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-secondary);
+		border-radius: var(--radius-md);
+		font-family: var(--font-mono);
+		font-size: 0.85rem;
+		color: var(--text-secondary);
+	}
+
+	.result-content {
+		margin-top: 1rem;
+	}
+
+	.hash-result {
+		margin-bottom: 1rem;
+	}
+
+	.algorithm-label {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--accent-primary);
+		margin-bottom: 0.5rem;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.hash-value {
+		font-family: var(--font-mono);
+		font-size: 0.9rem;
+		line-height: 1.6;
+		color: var(--text-primary);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
+		padding: 1rem;
+		word-break: break-all;
+		white-space: pre-wrap;
+	}
+
+	.input-info {
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.progress-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100vw;
+		height: 100vh;
+		background: rgba(0, 0, 0, 0.7);
+		backdrop-filter: blur(5px);
+		z-index: 9999;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.progress-overlay.hidden {
+		display: none;
+	}
+
+	.progress-content {
+		background: var(--bg-card);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-lg);
+		padding: 3rem;
+		text-align: center;
+		box-shadow: var(--shadow-xl);
+		min-width: 300px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.progress-spinner {
+		width: 40px;
+		height: 40px;
+		border: 3px solid var(--border-primary);
+		border-top: 3px solid var(--accent-primary);
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	.progress-text {
+		font-size: 1.1rem;
+		font-weight: 600;
+		color: var(--text-primary);
+		margin: 0;
+	}
+
+	.progress-info {
+		font-size: 0.9rem;
+		color: var(--text-secondary);
+		font-family: var(--font-mono);
+		margin: 0;
+	}
+
+	.progress-cancel-btn {
+		margin-top: 1rem;
+		padding: 0.75rem 1.5rem;
+		font-size: 0.9rem;
+		min-width: 120px;
+	}
+
+	.btn-danger {
+		background: var(--accent-error);
+		color: white;
+		border-color: var(--accent-error);
+	}
+
+	.btn-danger:hover {
+		background: #dc2626;
+		border-color: #dc2626;
+		transform: translateY(-1px);
+	}
+
+	@keyframes spin {
+		0% {
+			transform: rotate(0deg);
+		}
+		100% {
+			transform: rotate(360deg);
+		}
+	}
+
+	.btn.copied {
+		background: var(--accent-success) !important;
+		transform: scale(1.05);
+	}
+
+	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	/* Enhanced hover effects */
+	.glass-card:hover {
+		transform: translateY(-2px);
+	}
+</style>
