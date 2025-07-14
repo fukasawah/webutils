@@ -1,5 +1,6 @@
 # build output
 dist/
+.netlify/
 
 # generated types
 .astro/
@@ -22,3 +23,7 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+
+test-results/
+playwright-report/

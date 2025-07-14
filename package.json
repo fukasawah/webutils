@@ -5,11 +5,23 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "preview": "astro build && astro preview",
+    "preview-local": "astro build --local && astro preview --local ",
+    "astro": "astro",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:report": "playwright show-report"
   },
   "dependencies": {
     "@astrojs/netlify": "^6.4.1",
-    "astro": "^5.11.0"
+    "@noble/hashes": "^1.8.0",
+    "astro": "^5.11.0",
+    "hash-wasm": "^4.12.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@playwright/test": "^1.54.1",
+    "typescript": "^5.8.3"
   }
 }
