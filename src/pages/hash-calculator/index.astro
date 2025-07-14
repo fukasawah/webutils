@@ -26,7 +26,12 @@ import FileInput from "../../components/common/FileInput.astro";
 						</div>
 					</label>
 					<label class="algorithm-option">
-						<input type="radio" name="algorithm" value="SHA-256" checked />
+						<input
+							type="radio"
+							name="algorithm"
+							value="SHA-256"
+							checked
+						/>
 						<span>SHA-256</span>
 						<div class="algorithm-indicators">
 							<span class="indicator js">JS</span>
@@ -69,13 +74,13 @@ import FileInput from "../../components/common/FileInput.astro";
 							value="wasm"
 							checked
 						/>
-						<span>🚀 WASM (High Performance)</span>
-						<small id="wasm-status">Checking availability...</small>
+						<span>🚀 WASM</span>
+						<small id="wasm-status">Checking...</small>
 					</label>
 					<label class="performance-option">
 						<input type="radio" name="worker-type" value="js" />
-						<span>⚡ JavaScript (Compatible)</span>
-						<small>Always available</small>
+						<span>⚡ JavaScript</span>
+						<small>Available</small>
 					</label>
 				</div>
 			</div>
@@ -109,9 +114,6 @@ import FileInput from "../../components/common/FileInput.astro";
 					accept="*/*"
 					label="📁 Choose File"
 				/>
-				<div class="file-info">
-					<span id="file-status">No file selected</span>
-				</div>
 			</div>
 
 			<div class="control-section">
@@ -175,9 +177,8 @@ import FileInput from "../../components/common/FileInput.astro";
 		"text-input",
 	) as HTMLTextAreaElement;
 	const fileInput = document.getElementById("file-input") as HTMLInputElement;
-	const fileStatus = document.getElementById(
-		"file-status",
-	) as HTMLSpanElement;
+	const fileNameSpan = document.getElementById("file-input-name") as HTMLSpanElement;
+	const fileSizeSpan = document.getElementById("file-input-size") as HTMLSpanElement;
 	const calculateBtn = document.getElementById(
 		"calculate-btn",
 	) as HTMLButtonElement;
@@ -207,7 +208,7 @@ import FileInput from "../../components/common/FileInput.astro";
 		"SHA-256": { js: true, wasm: true },
 		"SHA-384": { js: true, wasm: true },
 		"SHA-512": { js: true, wasm: true },
-		"MD5": { js: false, wasm: true },
+		MD5: { js: false, wasm: true },
 	};
 
 	// State
@@ -267,7 +268,6 @@ import FileInput from "../../components/common/FileInput.astro";
 		}
 	}
 
-
 	function getSelectedAlgorithm(): string {
 		const selected = document.querySelector(
 			'input[name="algorithm"]:checked',
@@ -296,7 +296,10 @@ import FileInput from "../../components/common/FileInput.astro";
 		if (!wasmRadio || !jsRadio || !wasmLabel || !jsLabel) return;
 
 		// Check algorithm support
-		const algorithmSupport = ALGORITHM_SUPPORT[selectedAlgorithm as keyof typeof ALGORITHM_SUPPORT];
+		const algorithmSupport =
+			ALGORITHM_SUPPORT[
+				selectedAlgorithm as keyof typeof ALGORITHM_SUPPORT
+			];
 		const algorithmWasmSupported = algorithmSupport?.wasm ?? false;
 		const algorithmJsSupported = algorithmSupport?.js ?? false;
 
@@ -368,6 +371,11 @@ import FileInput from "../../components/common/FileInput.astro";
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 	}
 
+	function formatThroughput(bytes: number, timeInSeconds: number): string {
+		if (timeInSeconds <= 0) return "0 B/s";
+		const bytesPerSecond = bytes / timeInSeconds;
+		return formatFileSize(bytesPerSecond) + "/s";
+	}
 
 	function handleWorkerMessage(event: MessageEvent): void {
 		const data = event.data;
@@ -399,7 +407,22 @@ import FileInput from "../../components/common/FileInput.astro";
 				}
 
 				const throughput = formatFileSize(throughputBytesPerSec);
-				progressInfo.textContent = `Processing: ${progressPercent.toFixed(1)}% ${throughput}/s`;
+				
+				// Calculate remaining time
+				const remainingBytes = total - processed;
+				let remainingTimeText = "";
+				if (throughputBytesPerSec > 0 && remainingBytes > 0) {
+					const remainingSeconds = remainingBytes / throughputBytesPerSec;
+					if (remainingSeconds < 60) {
+						remainingTimeText = ` (${remainingSeconds.toFixed(0)}s remaining)`;
+					} else {
+						const minutes = Math.floor(remainingSeconds / 60);
+						const seconds = Math.floor(remainingSeconds % 60);
+						remainingTimeText = ` (${minutes}m ${seconds}s remaining)`;
+					}
+				}
+				
+				progressInfo.textContent = `Processing: ${progressPercent.toFixed(1)}% ${throughput}/s${remainingTimeText}`;
 				break;
 
 			case "completed":
@@ -412,10 +435,9 @@ import FileInput from "../../components/common/FileInput.astro";
 				if (data.inputType === "text") {
 					inputInfo.textContent = `Text input (${data.inputLength} characters) - Calculated using ${mode}`;
 				} else {
-					const processingTime = (data.processingTime / 1000).toFixed(
-						2,
-					);
-					inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${processingTime}s using ${mode}`;
+					const processingTime = (Date.now() - startTime) / 1000;
+					const throughput = formatThroughput(data.fileSize, processingTime);
+					inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${processingTime.toFixed(2)}s using ${mode} (${throughput})`;
 				}
 				copyBtn.disabled = false;
 				finishCalculation();
@@ -424,13 +446,12 @@ import FileInput from "../../components/common/FileInput.astro";
 			case "hash_complete":
 				const fileHashValue = data.hash.toUpperCase();
 				const fileMode = data.mode || "JavaScript";
-				const fileProcessingTime = (data.processingTime / 1000).toFixed(
-					2,
-				);
+				const fileProcessingTime = (Date.now() - startTime) / 1000;
+				const fileThroughput = formatThroughput(data.fileSize, fileProcessingTime);
 
 				resultAlgorithm.textContent = data.algorithm;
 				hashOutput.textContent = fileHashValue;
-				inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${fileProcessingTime}s using ${fileMode}`;
+				inputInfo.textContent = `File: ${currentFile!.name} (${formatFileSize(data.fileSize)}) - Processed in ${fileProcessingTime.toFixed(2)}s using ${fileMode} (${fileThroughput})`;
 				copyBtn.disabled = false;
 				finishCalculation();
 				break;
@@ -534,12 +555,11 @@ import FileInput from "../../components/common/FileInput.astro";
 		progressOverlay.classList.remove("hidden");
 		copyBtn.disabled = true;
 
-		const useWasm =
-			!!(
-				document.querySelector(
-					'input[name="worker-type"]',
-				) as HTMLInputElement
-			)?.checked;
+		const useWasm = !!(
+			document.querySelector(
+				'input[name="worker-type"]',
+			) as HTMLInputElement
+		)?.checked;
 
 		startTime = Date.now();
 		lastProgressTime = startTime;
@@ -610,12 +630,24 @@ import FileInput from "../../components/common/FileInput.astro";
 		if (file) {
 			currentFile = file;
 			const fileSizeText = formatFileSize(file.size);
-			fileStatus.textContent = `Selected: ${file.name} (${fileSizeText})`;
-			fileStatus.style.color = "var(--text-secondary)";
+			fileNameSpan.textContent = file.name;
+			fileSizeSpan.textContent = fileSizeText;
+			
+			// Add has-file class to file-input div
+			const fileInputDiv = fileInput.closest('.file-input');
+			if (fileInputDiv) {
+				fileInputDiv.classList.add('has-file');
+			}
 		} else {
 			currentFile = null;
-			fileStatus.textContent = "No file selected";
-			fileStatus.style.color = "var(--text-secondary)";
+			fileNameSpan.textContent = "No file selected";
+			fileSizeSpan.textContent = "-";
+			
+			// Remove has-file class from file-input div
+			const fileInputDiv = fileInput.closest('.file-input');
+			if (fileInputDiv) {
+				fileInputDiv.classList.remove('has-file');
+			}
 		}
 	}
 
@@ -664,7 +696,7 @@ import FileInput from "../../components/common/FileInput.astro";
 
 <style>
 	.control-section {
-		margin-bottom: 2rem;
+		margin-bottom: 1.5rem;
 	}
 
 	.control-section:last-child {
@@ -672,7 +704,7 @@ import FileInput from "../../components/common/FileInput.astro";
 	}
 
 	.control-section h3 {
-		margin-bottom: 1rem;
+		margin-bottom: 0.75rem;
 		font-size: 1.1rem;
 		color: var(--text-primary);
 	}
@@ -699,6 +731,13 @@ import FileInput from "../../components/common/FileInput.astro";
 	.algorithm-option:hover {
 		background: var(--bg-card);
 		border-color: var(--accent-primary);
+	}
+
+	.algorithm-option:has(input[type="radio"]:checked) {
+		background: var(--bg-card);
+		border-color: var(--accent-primary);
+		border-width: 2px;
+		box-shadow: 0 0 0 1px var(--accent-primary);
 	}
 
 	.algorithm-option input[type="radio"] {
@@ -767,8 +806,8 @@ import FileInput from "../../components/common/FileInput.astro";
 
 	.performance-option {
 		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
+		align-items: center;
+		gap: 0.5rem;
 		cursor: pointer;
 		padding: 0.5rem;
 		background: var(--bg-tertiary);
@@ -785,6 +824,13 @@ import FileInput from "../../components/common/FileInput.astro";
 	.performance-option:hover:not(.disabled) {
 		background: var(--bg-card);
 		border-color: var(--border-accent);
+	}
+
+	.performance-option:has(input[type="radio"]:checked) {
+		background: var(--bg-card);
+		border-color: var(--accent-primary);
+		border-width: 2px;
+		box-shadow: 0 0 0 1px var(--accent-primary);
 	}
 
 	.performance-option input[type="radio"] {
@@ -827,7 +873,7 @@ import FileInput from "../../components/common/FileInput.astro";
 	.performance-option small {
 		color: var(--text-muted);
 		font-size: 0.75rem;
-		margin-left: 1.5rem;
+		margin-left: auto;
 	}
 
 	.performance-option input[type="radio"]:disabled + span {
@@ -874,7 +920,7 @@ import FileInput from "../../components/common/FileInput.astro";
 	.input-method-tabs {
 		display: flex;
 		gap: 0.5rem;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1rem;
 	}
 
 	.tab-btn {
@@ -934,16 +980,6 @@ import FileInput from "../../components/common/FileInput.astro";
 		font-style: italic;
 	}
 
-	.file-info {
-		margin-top: 1rem;
-		padding: 0.75rem;
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-md);
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		color: var(--text-secondary);
-	}
 
 	.result-content {
 		margin-top: 1rem;
