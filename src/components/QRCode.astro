@@ -4,20 +4,21 @@ export interface Props {
   size?: number;
   id?: string;
   errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H';
+  format?: 'canvas' | 'svg';
 }
 
-const { text, size = 300, id, errorCorrectionLevel = 'M' } = Astro.props;
-const canvasId = id || `qr-${Math.random().toString(36).slice(2)}`;
+const { text, size = 300, id, errorCorrectionLevel = 'M', format = 'canvas' } = Astro.props;
+const elementId = id || `qr-${Math.random().toString(36).slice(2)}`;
 ---
 
-<canvas 
-  id={canvasId} 
-  width={size} 
-  height={size}
+<div 
+  id={elementId}
   data-qr-text={text || ''}
   data-qr-error-level={errorCorrectionLevel}
   data-qr-size={size}
-></canvas>
+  data-qr-format={format}
+  class="qr-container"
+></div>
 
 <script>
   import QRCode from 'qrcode';
@@ -38,86 +39,135 @@ const canvasId = id || `qr-${Math.random().toString(36).slice(2)}`;
       this.instances = new Map();
     }
     
-    async init(canvas: HTMLCanvasElement) {
-      const id = canvas.id;
-      const text = canvas.dataset.qrText || '';
-      const errorLevel = canvas.dataset.qrErrorLevel || 'M';
-      const size = parseInt(canvas.dataset.qrSize || '300');
+    async init(element: HTMLElement) {
+      const id = element.id;
+      const text = element.dataset.qrText || '';
+      const errorLevel = element.dataset.qrErrorLevel || 'M';
+      const size = parseInt(element.dataset.qrSize || '300');
+      const format = element.dataset.qrFormat || 'canvas';
       
-      this.instances.set(id, { canvas, text, errorLevel, size });
+      this.instances.set(id, { element, text, errorLevel, size, format });
       
-      console.log(`Initializing QR: ${id}`);
+      console.log(`Initializing QR: ${id} (${format})`);
       
       if (text) {
         try {
-          await QRCode.toCanvas(canvas, text, {
-            errorCorrectionLevel: errorLevel as any,
-            width: size,
-            margin: 2,
-            color: {
-              dark: '#000000',
-              light: '#ffffff'
-            }
-          });
+          if (format === 'svg') {
+            await this.generateSVG(element as HTMLDivElement, text, errorLevel, size);
+          } else {
+            await this.generateCanvas(element as HTMLDivElement, text, errorLevel, size);
+          }
         } catch (error) {
           console.error('QR Code rendering failed:', error);
-          this.showError(canvas, 'QR generation failed');
+          this.showError(element, 'QR generation failed');
         }
       } else {
-        this.showPlaceholder(canvas);
+        this.showPlaceholder(element);
       }
+    }
+    
+    async generateCanvas(container: HTMLDivElement, text: string, errorLevel: string, size: number) {
+      // Clear container
+      container.innerHTML = '';
+      
+      // Create canvas element
+      const canvas = document.createElement('canvas');
+      
+      // High-DPI display support
+      const dpr = window.devicePixelRatio || 1;
+      const actualSize = size * dpr;
+      
+      // Set canvas actual size for crisp rendering
+      canvas.width = actualSize;
+      canvas.height = actualSize;
+      
+      // Scale context for high-DPI
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
+      
+      await QRCode.toCanvas(canvas, text, {
+        errorCorrectionLevel: errorLevel as any,
+        width: actualSize,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      });
+      
+      // Set CSS size back to original
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+      
+      // Append canvas to container
+      container.appendChild(canvas);
+    }
+    
+    async generateSVG(container: HTMLDivElement, text: string, errorLevel: string, size: number) {
+      // Clear container
+      container.innerHTML = '';
+      
+      const svgString = await QRCode.toString(text, {
+        type: 'svg',
+        errorCorrectionLevel: errorLevel as any,
+        width: size,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      });
+      
+      container.innerHTML = svgString;
     }
     
     async update(id: string, text: string) {
       const instance = this.instances.get(id);
       if (!instance) return;
       
-      // Get current values from canvas dataset (may have been updated)
-      const canvas = instance.canvas;
-      const currentSize = parseInt(canvas.dataset.qrSize || instance.size.toString());
-      const currentErrorLevel = canvas.dataset.qrErrorLevel || instance.errorLevel;
+      // Get current values from element dataset (may have been updated)
+      const element = instance.element;
+      const currentSize = parseInt(element.dataset.qrSize || instance.size.toString());
+      const currentErrorLevel = element.dataset.qrErrorLevel || instance.errorLevel;
+      const currentFormat = element.dataset.qrFormat || instance.format;
       
       // Update instance values
       instance.size = currentSize;
       instance.errorLevel = currentErrorLevel;
+      instance.format = currentFormat;
       
       try {
-        await QRCode.toCanvas(canvas, text, {
-          errorCorrectionLevel: currentErrorLevel as any,
-          width: currentSize,
-          margin: 2,
-          color: {
-            dark: '#000000',
-            light: '#ffffff'
-          }
-        });
-        console.log(`QR Code updated (size: ${currentSize}, error: ${currentErrorLevel})`);
+        if (currentFormat === 'svg') {
+          await this.generateSVG(element as HTMLDivElement, text, currentErrorLevel, currentSize);
+        } else {
+          await this.generateCanvas(element as HTMLDivElement, text, currentErrorLevel, currentSize);
+        }
+        
+        console.log(`QR Code updated (size: ${currentSize}, error: ${currentErrorLevel}, format: ${currentFormat})`);
       } catch (error) {
         console.error('QR Code update failed:', error);
-        this.showError(canvas, 'Update failed');
+        this.showError(element, 'Update failed');
       }
     }
     
-    showPlaceholder(canvas: HTMLCanvasElement) {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.fillStyle = '#f5f5f5';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#999';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('QR Code', canvas.width / 2, canvas.height / 2);
+    showPlaceholder(element: HTMLElement) {
+      const div = element as HTMLDivElement;
+      div.innerHTML = `
+        <div style="width: 100%; height: 100%; background: #f5f5f5; display: flex; align-items: center; justify-content: center; color: #999; font-size: 14px; font-family: sans-serif;">
+          QR Code
+        </div>
+      `;
     }
     
-    showError(canvas: HTMLCanvasElement, message: string) {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.fillStyle = '#ffe6e6';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#cc0000';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+    showError(element: HTMLElement, message: string) {
+      const div = element as HTMLDivElement;
+      div.innerHTML = `
+        <div style="width: 100%; height: 100%; background: #ffe6e6; display: flex; align-items: center; justify-content: center; color: #cc0000; font-size: 12px; font-family: sans-serif;">
+          ${message}
+        </div>
+      `;
     }
     
     byId(id: string) {
@@ -135,11 +185,11 @@ const canvasId = id || `qr-${Math.random().toString(36).slice(2)}`;
   
   // 初期化関数
   function initializeQRCodes() {
-    const canvases = document.querySelectorAll('canvas[data-qr-size]');
-    console.log(`Found ${canvases.length} QR canvases`);
+    const qrElements = document.querySelectorAll('[data-qr-size]');
+    console.log(`Found ${qrElements.length} QR elements`);
     
-    canvases.forEach(canvas => {
-      window.QRCodeManager.init(canvas as HTMLCanvasElement);
+    qrElements.forEach(element => {
+      window.QRCodeManager.init(element as HTMLElement);
     });
   }
   
@@ -148,19 +198,26 @@ const canvasId = id || `qr-${Math.random().toString(36).slice(2)}`;
 </script>
 
 <style>
-canvas {
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  background: #fff;
+.qr-container {
   display: block;
 }
 
-canvas:empty {
+.qr-container:empty {
   background: linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
               linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
               linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
               linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
   background-size: 20px 20px;
   background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+.qr-container canvas {
+  display: block;
+}
+
+.qr-container svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 </style>
