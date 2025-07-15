@@ -2,12 +2,11 @@
 import Layout from '../../layouts/Layout.astro';
 import QRCode from '../../components/QRCode.astro';
 
-const DEFAULT_QR_SIZE = 300;
 ---
 
 <Layout title="QR Code Generator">
   <main>
-    <div class="container">
+    <div class="tool-container">
       <header class="tool-header">
         <h1>🔗 QR Code Generator</h1>
         <p class="tool-description">
@@ -16,62 +15,57 @@ const DEFAULT_QR_SIZE = 300;
       </header>
 
       <div class="tool-content">
-        <section class="input-section">
-          <div class="input-group">
+        <section class="glass-card tool-controls">
+          <div class="control-group">
             <label for="qrText">Text or URL to encode</label>
             <textarea 
               id="qrText" 
+              class="input"
               placeholder="Enter text, URL, or any data to generate QR code..."
               rows="4"
             ></textarea>
           </div>
 
-          <div class="options-grid">
-            <div class="input-group">
+          <div class="control-row">
+            <div class="control-group">
               <label for="qrSize">Size (pixels)</label>
               <input 
                 type="number" 
                 id="qrSize" 
+                class="input"
                 min="100" 
                 max="2000" 
                 step="10"
-                value={DEFAULT_QR_SIZE.toString()}
+                value="300"
                 placeholder="100-2000"
               />
             </div>
 
-            <div class="input-group">
+            <div class="control-group">
               <label for="errorLevel">Error Correction</label>
-              <select id="errorLevel">
+              <select id="errorLevel" class="input">
                 <option value="L">Low (~7%)</option>
                 <option value="M" selected>Medium (~15%)</option>
                 <option value="Q">Quartile (~25%)</option>
                 <option value="H">High (~30%)</option>
               </select>
             </div>
-            
-            <div class="input-group">
-              <label>Output Format</label>
-              <div class="format-options">
-                <label class="format-option">
-                  <input type="radio" name="outputFormat" value="canvas" checked>
-                  <span>Canvas</span>
-                </label>
-                <label class="format-option">
-                  <input type="radio" name="outputFormat" value="svg">
-                  <span>SVG</span>
-                </label>
-              </div>
-            </div>
+          </div>
+          
+          <div class="control-group">
+            <label for="outputFormat">Output Format</label>
+            <select id="outputFormat" class="input">
+              <option value="canvas">Canvas</option>
+              <option value="svg">SVG</option>
+            </select>
           </div>
 
           <button id="generateBtn" class="btn btn-primary">
-            Generate QR Code
+            🔄 Regenerate QR Code
           </button>
           
-          <!-- Size recommendation and suggestions (shown after generate button) -->
+          <!-- Simple feedback area -->
           <div class="generation-feedback">
-            <!-- Error correction suggestion (shown only when needed) -->
             <div class="suggestion-area" id="suggestionArea" style="display: none;">
               <div class="suggestion-content">
                 <span class="suggestion-icon">💡</span>
@@ -80,25 +74,31 @@ const DEFAULT_QR_SIZE = 300;
               </div>
             </div>
             
-            <!-- Size recommendation (shown when current size is too small) -->
             <div class="warning-area" id="sizeWarningArea" style="display: none;">
               <div class="warning-content">
                 <span class="warning-icon">⚠️</span>
                 <span class="warning-text" id="sizeWarningText"></span>
-                <button class="warning-btn" id="sizeOptimizeBtn">Optimize Size</button>
+                <button class="warning-btn" id="sizeOptimizeBtn">Fix Size</button>
               </div>
             </div>
           </div>
         </section>
 
-        <section class="output-section">
+        <section class="glass-card tool-results">
+          <div class="result-header">
+            <h3>Generated QR Code</h3>
+          </div>
+          
           <div class="qr-container">
             <QRCode id="mainQR" />
           </div>
           
           <div class="qr-actions">
-            <button id="downloadBtn" class="btn btn-secondary" disabled>
-              📥<br />Download
+            <button id="downloadPngBtn" class="btn btn-secondary" disabled>
+              📥<br />Download PNG
+            </button>
+            <button id="downloadSvgBtn" class="btn btn-secondary" disabled>
+              📥<br />Download SVG
             </button>
             <button id="copyBtn" class="btn btn-secondary" disabled>
               📋<br />Copy Image
@@ -137,6 +137,8 @@ const DEFAULT_QR_SIZE = 300;
   const textInput = document.getElementById('qrText') as HTMLTextAreaElement;
   const sizeInput = document.getElementById('qrSize') as HTMLInputElement;
   const errorSelect = document.getElementById('errorLevel') as HTMLSelectElement;
+  const outputFormat = document.getElementById('outputFormat') as HTMLSelectElement;
+  const fileFormat = document.getElementById('fileFormat') as HTMLSelectElement;
   const generateBtn = document.getElementById('generateBtn') as HTMLButtonElement;
   const downloadBtn = document.getElementById('downloadBtn') as HTMLButtonElement;
   const copyBtn = document.getElementById('copyBtn') as HTMLButtonElement;
@@ -155,69 +157,73 @@ const DEFAULT_QR_SIZE = 300;
 
   let currentText = '';
   
-  // Default QR code size
-  const DEFAULT_QR_SIZE = 300;
+  // Common SVG to PNG conversion function
+  function convertSVGToPNG(qrElement: HTMLElement, callback: (dataUrl: string) => void) {
+    const svg = qrElement.querySelector('svg');
+    if (svg) {
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svg);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx?.drawImage(img, 0, 0);
+        callback(canvas.toDataURL());
+      };
+      
+      img.src = 'data:image/svg+xml;base64,' + btoa(svgString);
+    }
+  }
+
+  // Download SVG directly
+  function downloadSVG(qrElement: HTMLElement, filename: string) {
+    const svg = qrElement.querySelector('svg');
+    if (svg) {
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svg);
+      const blob = new Blob([svgString], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = url;
+      link.click();
+      
+      URL.revokeObjectURL(url);
+    }
+  }
   
   // Get selected output format
   function getSelectedFormat(): string {
-    const selectedRadio = document.querySelector('input[name="outputFormat"]:checked') as HTMLInputElement;
-    return selectedRadio ? selectedRadio.value : 'canvas';
+    return outputFormat.value || 'canvas';
   }
   
-  // QR Code capacity limits (bytes) - maximum values for different error correction levels
+  // Simple QR Code capacity check
   const QR_CAPACITY = {
-    'L': 2953, // Low (~7% error correction)
-    'M': 2331, // Medium (~15% error correction) 
-    'Q': 1663, // Quartile (~25% error correction)
-    'H': 1273  // High (~30% error correction)
+    'L': 2953, 'M': 2331, 'Q': 1663, 'H': 1273
   };
   
-  // Estimate QR code version based on data size and error correction level
-  function estimateVersion(bytes: number, errorLevel: string): number {
-    const maxCapacity = QR_CAPACITY[errorLevel as keyof typeof QR_CAPACITY] || QR_CAPACITY.M;
-    const ratio = bytes / maxCapacity;
-    
-    // Simple estimation: linear interpolation between Version 1 and 40
-    // Version 1 can hold ~7-17 bytes, Version 40 holds the max capacity
-    const estimatedVersion = Math.max(1, Math.min(40, Math.ceil(ratio * 40)));
-    return estimatedVersion;
-  }
-  
-  // Get QR code module count for a given version
-  function getModuleCount(version: number): number {
-    return 21 + 4 * (version - 1);
-  }
-  
-  // Calculate recommended pixel size based on 4 pixels per module
-  function getRecommendedPixelSize(version: number): number {
-    const modules = getModuleCount(version);
-    return modules * 4; // 4 pixels per module for reliable scanning
-  }
-  
-  // Calculate data usage for QR code with size recommendations
+  // Simple data usage calculation
   function calculateDataUsage(text: string, errorLevel: string): { 
     current: number, 
     max: number, 
-    percentage: number,
-    estimatedVersion: number,
-    recommendedSize: number
+    percentage: number
   } {
     const utf8Bytes = new TextEncoder().encode(text).length;
     const maxCapacity = QR_CAPACITY[errorLevel as keyof typeof QR_CAPACITY] || QR_CAPACITY.M;
     const percentage = Math.round((utf8Bytes / maxCapacity) * 100);
-    const estimatedVersion = estimateVersion(utf8Bytes, errorLevel);
-    const recommendedSize = getRecommendedPixelSize(estimatedVersion);
     
     return {
       current: utf8Bytes,
       max: maxCapacity, 
-      percentage: Math.min(percentage, 100),
-      estimatedVersion: estimatedVersion,
-      recommendedSize: recommendedSize
+      percentage: Math.min(percentage, 100)
     };
   }
   
-  // Find alternative error correction levels that can fit the data
+  // Find alternative error correction levels
   function findAlternativeErrorLevels(text: string, currentLevel: string): Array<{level: string, usage: any}> {
     const levels = ['L', 'M', 'Q', 'H'];
     const alternatives = [];
@@ -231,11 +237,10 @@ const DEFAULT_QR_SIZE = 300;
       }
     }
     
-    // Sort by capacity (descending) - prefer higher error correction when possible
     return alternatives.sort((a, b) => b.usage.max - a.usage.max);
   }
   
-  // Update suggestion area
+  // Simple suggestion for capacity issues
   function updateSuggestion(text: string, currentLevel: string) {
     const currentUsage = calculateDataUsage(text, currentLevel);
     
@@ -246,11 +251,10 @@ const DEFAULT_QR_SIZE = 300;
         const best = alternatives[0];
         const levelNames = { 'L': 'Low', 'M': 'Medium', 'Q': 'Quartile', 'H': 'High' };
         
-        suggestionText.textContent = `Error correction "${levelNames[best.level as keyof typeof levelNames]}" would fit (${best.usage.current}/${best.usage.max} bytes)`;
+        suggestionText.textContent = `Try "${levelNames[best.level as keyof typeof levelNames]}" error correction instead`;
         suggestionBtn.onclick = () => {
           errorSelect.value = best.level;
           updateDataUsageDisplay();
-          // Auto-generate after applying suggestion
           setTimeout(() => generateBtn.click(), 100);
         };
         suggestionArea.style.display = 'block';
@@ -262,32 +266,23 @@ const DEFAULT_QR_SIZE = 300;
     }
   }
   
-  // Update size warning area
-  function updateSizeWarning(text: string, currentLevel: string, currentSize: number) {
-    if (!text) {
+  // Simple size warning (only for very small sizes)
+  function updateSizeWarning(text: string, currentSize: number) {
+    if (!text || currentSize >= 200) {
       sizeWarningArea.style.display = 'none';
       return;
     }
     
-    const usage = calculateDataUsage(text, currentLevel);
-    const recommendedSize = usage.recommendedSize;
+    const recommendedSize = 300;
+    sizeWarningText.textContent = `Size too small for reliable scanning. ${recommendedSize}px recommended.`;
     
-    if (currentSize < recommendedSize) {
-      const levelNames = { 'L': 'Low', 'M': 'Medium', 'Q': 'Quartile', 'H': 'High' };
-      
-      sizeWarningText.textContent = `For reliable scanning with error correction "${levelNames[currentLevel as keyof typeof levelNames]}", ${recommendedSize}px recommended (current: ${currentSize}px)`;
-      
-      sizeOptimizeBtn.onclick = () => {
-        sizeInput.value = recommendedSize.toString();
-        updateDataUsageDisplay();
-        // Auto-generate after optimizing size
-        setTimeout(() => generateBtn.click(), 100);
-      };
-      
-      sizeWarningArea.style.display = 'block';
-    } else {
-      sizeWarningArea.style.display = 'none';
-    }
+    sizeOptimizeBtn.onclick = () => {
+      sizeInput.value = recommendedSize.toString();
+      updateDataUsageDisplay();
+      setTimeout(() => generateBtn.click(), 100);
+    };
+    
+    sizeWarningArea.style.display = 'block';
   }
 
   // Real-time data usage update
@@ -321,20 +316,98 @@ const DEFAULT_QR_SIZE = 300;
       updateSuggestion(text, errorLevel);
       
       // Update size warning
-      const currentSize = parseInt(sizeInput.value) || DEFAULT_QR_SIZE;
-      updateSizeWarning(text, errorLevel, currentSize);
+      const currentSize = parseInt(sizeInput.value) || 300;
+      updateSizeWarning(text, currentSize);
     } else {
       suggestionArea.style.display = 'none';
       sizeWarningArea.style.display = 'none';
     }
   }
   
-  // Add event listeners for real-time updates
-  textInput.addEventListener('input', updateDataUsageDisplay);
+  // Debounce function for performance
+  function debounce(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout;
+    return function executedFunction(...args: any[]) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Add event listeners with debouncing for data usage display
+  textInput.addEventListener('input', debounce(updateDataUsageDisplay, 300));
   errorSelect.addEventListener('change', updateDataUsageDisplay);
-  sizeInput.addEventListener('input', updateDataUsageDisplay);
+  sizeInput.addEventListener('input', debounce(updateDataUsageDisplay, 300));
   
-  // Generate QR Code
+  // Add event listeners for auto-generation
+  textInput.addEventListener('input', debounce(() => generateQRCode(), 500));
+  errorSelect.addEventListener('change', () => generateQRCode());
+  sizeInput.addEventListener('input', debounce(() => generateQRCode(), 300));
+  outputFormat.addEventListener('change', () => generateQRCode());
+  
+  // Common QR Code generation function
+  function generateQRCode(text: string = textInput.value.trim()) {
+    if (!text) {
+      // Show placeholder when no text
+      const qrElement = document.getElementById('mainQR') as HTMLElement;
+      if (qrElement && window.QRCode) {
+        qrElement.innerHTML = `
+          <div style="width: 300px; height: 300px; background: #f5f5f5; display: flex; align-items: center; justify-content: center; color: #999; font-size: 14px; border-radius: 8px;">
+            Enter text to generate QR code
+          </div>
+        `;
+      }
+      // Disable actions
+      downloadPngBtn.disabled = true;
+      downloadSvgBtn.disabled = true;
+      copyBtn.disabled = true;
+      shareBtn.disabled = true;
+      qrInfo.style.display = 'none';
+      return;
+    }
+
+    const size = Math.max(100, Math.min(2000, parseInt(sizeInput.value) || 300));
+    const errorLevel = errorSelect.value;
+    
+    // Update QR code properties
+    const qrElement = document.getElementById('mainQR') as HTMLElement;
+    if (qrElement) {
+      qrElement.dataset.qrSize = size.toString();
+      qrElement.dataset.qrErrorLevel = errorLevel;
+      qrElement.dataset.qrFormat = getSelectedFormat();
+    }
+
+    // Generate QR code
+    if (window.QRCode) {
+      try {
+        window.QRCode.byId('mainQR').update(text);
+        currentText = text;
+        
+        // Update info and enable actions
+        updateQRInfo(text, size, errorLevel);
+        downloadPngBtn.disabled = false;
+        downloadSvgBtn.disabled = false;
+        copyBtn.disabled = false;
+        shareBtn.disabled = false;
+        qrInfo.style.display = 'block';
+      } catch (error) {
+        console.error('QR Code generation failed:', error);
+        // Show error state
+        if (qrElement) {
+          qrElement.innerHTML = `
+            <div style="width: 300px; height: 300px; background: #fee; display: flex; align-items: center; justify-content: center; color: #c00; font-size: 14px; border-radius: 8px;">
+              QR generation failed
+            </div>
+          `;
+        }
+      }
+    }
+  }
+
+  // Manual generation button (for explicit user action)
   generateBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
     if (!text) {
@@ -342,7 +415,6 @@ const DEFAULT_QR_SIZE = 300;
       return;
     }
 
-    const size = Math.max(100, Math.min(2000, parseInt(sizeInput.value) || DEFAULT_QR_SIZE));
     const errorLevel = errorSelect.value;
     
     // Check capacity before generating
@@ -354,7 +426,7 @@ const DEFAULT_QR_SIZE = 300;
       if (alternatives.length > 0) {
         const best = alternatives[0];
         const levelNames = { 'L': 'Low', 'M': 'Medium', 'Q': 'Quartile', 'H': 'High' };
-        message += `Suggestion: Error correction "${levelNames[best.level as keyof typeof levelNames]}" would fit (${best.usage.current}/${best.usage.max} bytes).\n\n`;
+        message += `Suggestion: Error correction \"${levelNames[best.level as keyof typeof levelNames]}\" would fit (${best.usage.current}/${best.usage.max} bytes).\n\n`;
       } else {
         message += `Consider using shorter text.\n\n`;
       }
@@ -367,66 +439,42 @@ const DEFAULT_QR_SIZE = 300;
       }
     }
     
-    // Update QR code size and regenerate
-    const qrElement = document.getElementById('mainQR') as HTMLElement;
-    if (qrElement) {
-      qrElement.dataset.qrSize = size.toString();
-      qrElement.dataset.qrErrorLevel = errorLevel;
-      qrElement.dataset.qrFormat = getSelectedFormat();
-    }
-
-    // Generate QR code
-    if (window.QRCode) {
-      window.QRCode.byId('mainQR').update(text);
-      currentText = text;
-      
-      // Update info and enable actions
-      updateQRInfo(text, size, errorLevel);
-      downloadBtn.disabled = false;
-      copyBtn.disabled = false;
-      shareBtn.disabled = false;
-      qrInfo.style.display = 'block';
-    }
+    generateQRCode(text);
   });
 
   // Download QR Code as PNG
-  downloadBtn.addEventListener('click', () => {
+  downloadPngBtn.addEventListener('click', () => {
     const qrElement = document.getElementById('mainQR') as HTMLElement;
     if (qrElement && currentText) {
-      const format = qrElement.dataset.qrFormat || 'canvas';
+      const qrFormat = qrElement.dataset.qrFormat || 'canvas';
+      const timestamp = Date.now();
       
-      if (format === 'canvas') {
+      if (qrFormat === 'canvas') {
         const canvas = qrElement.querySelector('canvas') as HTMLCanvasElement;
         if (canvas) {
           const link = document.createElement('a');
-          link.download = `qrcode-${Date.now()}.png`;
+          link.download = `qrcode-${timestamp}.png`;
           link.href = canvas.toDataURL();
           link.click();
         }
       } else {
-        // For SVG format, convert to PNG for download
-        const svg = qrElement.querySelector('svg');
-        if (svg) {
-          const serializer = new XMLSerializer();
-          const svgString = serializer.serializeToString(svg);
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const img = new Image();
-          
-          img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx?.drawImage(img, 0, 0);
-            
-            const link = document.createElement('a');
-            link.download = `qrcode-${Date.now()}.png`;
-            link.href = canvas.toDataURL();
-            link.click();
-          };
-          
-          img.src = 'data:image/svg+xml;base64,' + btoa(svgString);
-        }
+        // For SVG QR, convert to PNG for download
+        convertSVGToPNG(qrElement, (dataUrl) => {
+          const link = document.createElement('a');
+          link.download = `qrcode-${timestamp}.png`;
+          link.href = dataUrl;
+          link.click();
+        });
       }
+    }
+  });
+
+  // Download QR Code as SVG
+  downloadSvgBtn.addEventListener('click', () => {
+    const qrElement = document.getElementById('mainQR') as HTMLElement;
+    if (qrElement && currentText) {
+      const timestamp = Date.now();
+      downloadSVG(qrElement, `qrcode-${timestamp}.svg`);
     }
   });
 
@@ -435,9 +483,10 @@ const DEFAULT_QR_SIZE = 300;
     const qrElement = document.getElementById('mainQR') as HTMLElement;
     if (qrElement && currentText) {
       try {
-        const format = qrElement.dataset.qrFormat || 'canvas';
+        const qrFormat = qrElement.dataset.qrFormat || 'canvas';
         
-        if (format === 'canvas') {
+        // Copy as PNG (always)
+        if (qrFormat === 'canvas') {
           const canvas = qrElement.querySelector('canvas') as HTMLCanvasElement;
           if (canvas) {
             canvas.toBlob(async (blob) => {
@@ -455,11 +504,8 @@ const DEFAULT_QR_SIZE = 300;
             });
           }
         } else {
-          // For SVG format, convert to PNG for clipboard
-          const svg = qrElement.querySelector('svg');
-          if (svg) {
-            const serializer = new XMLSerializer();
-            const svgString = serializer.serializeToString(svg);
+          // For SVG QR, convert to PNG for clipboard
+          convertSVGToPNG(qrElement, (dataUrl) => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             const img = new Image();
@@ -484,8 +530,8 @@ const DEFAULT_QR_SIZE = 300;
               });
             };
             
-            img.src = 'data:image/svg+xml;base64,' + btoa(svgString);
-          }
+            img.src = dataUrl;
+          });
         }
       } catch (error) {
         console.error('Failed to copy to clipboard:', error);
@@ -498,7 +544,7 @@ const DEFAULT_QR_SIZE = 300;
   shareBtn.addEventListener('click', () => {
     if (currentText) {
       try {
-        const currentSize = parseInt(sizeInput.value) || DEFAULT_QR_SIZE;
+        const currentSize = parseInt(sizeInput.value) || 300;
         const currentErrorLevel = errorSelect.value;
         
         const params = new URLSearchParams();
@@ -547,84 +593,41 @@ const DEFAULT_QR_SIZE = 300;
     infoUsage.textContent = `${usage.current}/${usage.max} bytes (${usage.percentage}%)`;
     infoUsage.style.color = usageColor;
     
-    // Show warning if approaching limit
-    if (usage.percentage > 100) {
-      infoUsage.title = 'Error: Exceeds maximum QR code capacity for this error correction level!';
-    } else if (usage.percentage > 90) {
-      infoUsage.title = 'Warning: Approaching QR code capacity limit!';
-    } else if (usage.percentage > 75) {
-      infoUsage.title = 'Caution: High data usage for this error correction level';
-    } else {
-      infoUsage.title = 'Data usage within safe limits';
-    }
   }
 
-  // Generate from URL parameters
+  // Initialize from URL parameters
   const urlParams = new URLSearchParams(window.location.search);
   const urlText = urlParams.get('text');
   const urlSize = urlParams.get('size');
   const urlErrorLevel = urlParams.get('errorLevel') || urlParams.get('error');
   
-  let hasValidParams = false;
-  
-  // Set initial values from URL parameters and validate
-  if (urlText && urlText.trim()) {
-    textInput.value = urlText;
-    hasValidParams = true;
-  }
-  
+  // Set initial values from URL parameters
+  if (urlText) textInput.value = urlText;
   if (urlSize) {
     const size = parseInt(urlSize);
-    if (!isNaN(size) && size >= 100 && size <= 2000) {
-      sizeInput.value = size.toString();
-    }
+    if (size >= 100 && size <= 2000) sizeInput.value = size.toString();
   }
-  
   if (urlErrorLevel && ['L', 'M', 'Q', 'H'].includes(urlErrorLevel.toUpperCase())) {
     errorSelect.value = urlErrorLevel.toUpperCase();
   }
   
-  // Auto-generate if we have valid text and parameters are valid
-  if (hasValidParams && urlText && urlText.trim()) {
-    // Use setTimeout to ensure DOM is ready and QRCode component is initialized
+  // Auto-generate if text is provided
+  if (urlText && urlText.trim()) {
     setTimeout(() => {
-      updateDataUsageDisplay(); // Update usage display first
-      generateBtn.click();
+      updateDataUsageDisplay();
+      generateQRCode();
+    }, 100);
+  } else {
+    // Show initial placeholder
+    setTimeout(() => {
+      updateDataUsageDisplay();
+      generateQRCode();
     }, 100);
   }
-  
-  // Initial display update
-  setTimeout(updateDataUsageDisplay, 50);
 </script>
 
 <style>
-  .container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem;
-  }
-
-  .tool-header {
-    text-align: center;
-    margin-bottom: 3rem;
-  }
-
-  .tool-header h1 {
-    font-size: 2.5rem;
-    margin-bottom: 1rem;
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .tool-description {
-    font-size: 1.1rem;
-    color: var(--text-muted);
-    max-width: 600px;
-    margin: 0 auto;
-    line-height: 1.6;
-  }
+  /* Tool-specific styles only */
 
   .tool-content {
     display: grid;
@@ -633,119 +636,13 @@ const DEFAULT_QR_SIZE = 300;
     margin-bottom: 3rem;
   }
 
-  .input-section {
-    background: var(--bg-card);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-lg);
-    padding: 2rem;
-  }
+  /* Using global control-group styles - update HTML classes */
 
-  .input-group {
-    margin-bottom: 1.5rem;
-  }
+  /* Using global control-row for grid layout */
 
-  .input-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: var(--text-primary);
-  }
+  /* Using global button styles */
 
-  .input-group textarea,
-  .input-group select,
-  .input-group input[type="number"] {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-secondary);
-    border-radius: var(--radius-md);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: inherit;
-    font-size: 0.9rem;
-    transition: border-color 0.2s ease;
-  }
-
-  .input-group textarea:focus,
-  .input-group select:focus,
-  .input-group input[type="number"]:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-  }
-
-  /* Number input specific styling */
-  .input-group input[type="number"] {
-    -moz-appearance: textfield; /* Firefox */
-  }
-
-  /* Webkit browsers (Chrome, Safari, Edge) */
-  .input-group input[type="number"]::-webkit-outer-spin-button,
-  .input-group input[type="number"]::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  .input-group textarea {
-    resize: vertical;
-    min-height: 100px;
-  }
-
-  .options-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: var(--radius-md);
-    font-weight: 500;
-    text-decoration: none;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    font-size: 0.9rem;
-  }
-
-  .btn-primary {
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-    color: white;
-    width: 100%;
-    justify-content: center;
-  }
-
-  .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-  }
-
-  .btn-secondary {
-    background: var(--bg-card);
-    color: var(--text-primary);
-    border: 1px solid var(--border-primary);
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--bg-hover);
-    transform: translateY(-1px);
-  }
-
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none !important;
-  }
-
-  .output-section {
-    background: var(--bg-card);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-lg);
-    padding: 2rem;
-    text-align: center;
-  }
+  /* Using global glass-card tool-results */
 
   .qr-container {
     margin-bottom: 2rem;
@@ -767,6 +664,7 @@ const DEFAULT_QR_SIZE = 300;
     padding: 1.5rem;
     text-align: left;
   }
+
 
   .info-item {
     display: flex;
