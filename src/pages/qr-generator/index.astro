@@ -1,0 +1,681 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import QRCode from '../../components/QRCode.astro';
+
+const DEFAULT_QR_SIZE = 300;
+---
+
+<Layout title="QR Code Generator">
+  <main>
+    <div class="container">
+      <header class="tool-header">
+        <h1>🔗 QR Code Generator</h1>
+        <p class="tool-description">
+          Generate QR codes from text, URLs, or any data. Customize size and error correction level for optimal scanning.
+        </p>
+      </header>
+
+      <div class="tool-content">
+        <section class="input-section">
+          <div class="input-group">
+            <label for="qrText">Text or URL to encode</label>
+            <textarea 
+              id="qrText" 
+              placeholder="Enter text, URL, or any data to generate QR code..."
+              rows="4"
+            ></textarea>
+          </div>
+
+          <div class="options-grid">
+            <div class="input-group">
+              <label for="qrSize">Size (pixels)</label>
+              <input 
+                type="number" 
+                id="qrSize" 
+                min="100" 
+                max="2000" 
+                step="10"
+                value={DEFAULT_QR_SIZE.toString()}
+                placeholder="100-2000"
+              />
+            </div>
+
+            <div class="input-group">
+              <label for="errorLevel">Error Correction</label>
+              <select id="errorLevel">
+                <option value="L">Low (~7%)</option>
+                <option value="M" selected>Medium (~15%)</option>
+                <option value="Q">Quartile (~25%)</option>
+                <option value="H">High (~30%)</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="generateBtn" class="btn btn-primary">
+            Generate QR Code
+          </button>
+        </section>
+
+        <section class="output-section">
+          <div class="qr-container">
+            <QRCode id="mainQR" />
+          </div>
+          
+          <div class="qr-actions">
+            <button id="downloadBtn" class="btn btn-secondary" disabled>
+              📥<br />Download
+            </button>
+            <button id="copyBtn" class="btn btn-secondary" disabled>
+              📋<br />Copy Image
+            </button>
+            <button id="shareBtn" class="btn btn-secondary" disabled>
+              🔗<br />Copy URL
+            </button>
+          </div>
+
+          <div class="qr-info" id="qrInfo" style="display: none;">
+            <div class="info-item">
+              <span class="label">Content:</span>
+              <span class="value" id="infoContent">-</span>
+            </div>
+            <div class="info-item">
+              <span class="label">Size:</span>
+              <span class="value" id="infoSize">-</span>
+            </div>
+            <div class="info-item">
+              <span class="label">Error Correction:</span>
+              <span class="value" id="infoError">-</span>
+            </div>
+            <div class="info-item">
+              <span class="label">Data Usage:</span>
+              <span class="value" id="infoUsage">-</span>
+            </div>
+          </div>
+          
+          <!-- Error correction suggestion (shown only when needed) -->
+          <div class="suggestion-area" id="suggestionArea" style="display: none;">
+            <div class="suggestion-content">
+              <span class="suggestion-icon">💡</span>
+              <span class="suggestion-text" id="suggestionText"></span>
+              <button class="suggestion-btn" id="suggestionBtn">Apply</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+    </div>
+  </main>
+</Layout>
+
+<script>
+  const textInput = document.getElementById('qrText') as HTMLTextAreaElement;
+  const sizeInput = document.getElementById('qrSize') as HTMLInputElement;
+  const errorSelect = document.getElementById('errorLevel') as HTMLSelectElement;
+  const generateBtn = document.getElementById('generateBtn') as HTMLButtonElement;
+  const downloadBtn = document.getElementById('downloadBtn') as HTMLButtonElement;
+  const copyBtn = document.getElementById('copyBtn') as HTMLButtonElement;
+  const shareBtn = document.getElementById('shareBtn') as HTMLButtonElement;
+  const qrInfo = document.getElementById('qrInfo') as HTMLDivElement;
+  const infoContent = document.getElementById('infoContent') as HTMLSpanElement;
+  const infoSize = document.getElementById('infoSize') as HTMLSpanElement;
+  const infoError = document.getElementById('infoError') as HTMLSpanElement;
+  const infoUsage = document.getElementById('infoUsage') as HTMLSpanElement;
+  const suggestionArea = document.getElementById('suggestionArea') as HTMLDivElement;
+  const suggestionText = document.getElementById('suggestionText') as HTMLSpanElement;
+  const suggestionBtn = document.getElementById('suggestionBtn') as HTMLButtonElement;
+
+  let currentText = '';
+  
+  // Default QR code size
+  const DEFAULT_QR_SIZE = 300;
+  
+  // QR Code capacity limits (bytes) - maximum values for different error correction levels
+  const QR_CAPACITY = {
+    'L': 2953, // Low (~7% error correction)
+    'M': 2331, // Medium (~15% error correction) 
+    'Q': 1663, // Quartile (~25% error correction)
+    'H': 1273  // High (~30% error correction)
+  };
+  
+  // Calculate data usage for QR code
+  function calculateDataUsage(text: string, errorLevel: string): { current: number, max: number, percentage: number } {
+    const utf8Bytes = new TextEncoder().encode(text).length;
+    const maxCapacity = QR_CAPACITY[errorLevel as keyof typeof QR_CAPACITY] || QR_CAPACITY.M;
+    const percentage = Math.round((utf8Bytes / maxCapacity) * 100);
+    
+    return {
+      current: utf8Bytes,
+      max: maxCapacity, 
+      percentage: Math.min(percentage, 100)
+    };
+  }
+  
+  // Find alternative error correction levels that can fit the data
+  function findAlternativeErrorLevels(text: string, currentLevel: string): Array<{level: string, usage: any}> {
+    const levels = ['L', 'M', 'Q', 'H'];
+    const alternatives = [];
+    
+    for (const level of levels) {
+      if (level !== currentLevel) {
+        const usage = calculateDataUsage(text, level);
+        if (usage.percentage <= 100) {
+          alternatives.push({ level, usage });
+        }
+      }
+    }
+    
+    // Sort by capacity (descending) - prefer higher error correction when possible
+    return alternatives.sort((a, b) => b.usage.max - a.usage.max);
+  }
+  
+  // Update suggestion area
+  function updateSuggestion(text: string, currentLevel: string) {
+    const currentUsage = calculateDataUsage(text, currentLevel);
+    
+    if (currentUsage.percentage > 100) {
+      const alternatives = findAlternativeErrorLevels(text, currentLevel);
+      
+      if (alternatives.length > 0) {
+        const best = alternatives[0];
+        const levelNames = { 'L': 'Low', 'M': 'Medium', 'Q': 'Quartile', 'H': 'High' };
+        
+        suggestionText.textContent = `Error correction "${levelNames[best.level as keyof typeof levelNames]}" would fit (${best.usage.current}/${best.usage.max} bytes)`;
+        suggestionBtn.onclick = () => {
+          errorSelect.value = best.level;
+          updateDataUsageDisplay();
+        };
+        suggestionArea.style.display = 'block';
+      } else {
+        suggestionArea.style.display = 'none';
+      }
+    } else {
+      suggestionArea.style.display = 'none';
+    }
+  }
+
+  // Real-time data usage update
+  function updateDataUsageDisplay() {
+    const text = textInput.value.trim();
+    const errorLevel = errorSelect.value;
+    
+    if (text) {
+      const usage = calculateDataUsage(text, errorLevel);
+      const usageColor = usage.percentage > 90 ? '#ff4444' : usage.percentage > 75 ? '#ff8800' : '#888';
+      
+      // Update a small indicator near the textarea
+      let indicator = document.getElementById('dataUsageIndicator');
+      if (!indicator) {
+        indicator = document.createElement('div');
+        indicator.id = 'dataUsageIndicator';
+        indicator.style.cssText = 'font-size: 0.8rem; margin-top: 0.25rem; color: #666;';
+        textInput.parentNode?.appendChild(indicator);
+      }
+      
+      indicator.textContent = `${usage.current}/${usage.max} bytes (${usage.percentage}%)`;
+      indicator.style.color = usageColor;
+      
+      if (usage.percentage > 100) {
+        indicator.textContent += ' - Exceeds capacity!';
+      }
+    }
+    
+    // Update suggestion
+    if (text) {
+      updateSuggestion(text, errorLevel);
+    }
+  }
+  
+  // Add event listeners for real-time updates
+  textInput.addEventListener('input', updateDataUsageDisplay);
+  errorSelect.addEventListener('change', updateDataUsageDisplay);
+  
+  // Generate QR Code
+  generateBtn.addEventListener('click', () => {
+    const text = textInput.value.trim();
+    if (!text) {
+      alert('Please enter some text or URL to generate QR code');
+      return;
+    }
+
+    const size = Math.max(100, Math.min(2000, parseInt(sizeInput.value) || DEFAULT_QR_SIZE));
+    const errorLevel = errorSelect.value;
+    
+    // Check capacity before generating
+    const usage = calculateDataUsage(text, errorLevel);
+    if (usage.percentage > 100) {
+      const alternatives = findAlternativeErrorLevels(text, errorLevel);
+      let message = `Warning: The text exceeds QR code capacity (${usage.current}/${usage.max} bytes).\n`;
+      
+      if (alternatives.length > 0) {
+        const best = alternatives[0];
+        const levelNames = { 'L': 'Low', 'M': 'Medium', 'Q': 'Quartile', 'H': 'High' };
+        message += `Suggestion: Error correction "${levelNames[best.level as keyof typeof levelNames]}" would fit (${best.usage.current}/${best.usage.max} bytes).\n\n`;
+      } else {
+        message += `Consider using shorter text.\n\n`;
+      }
+      
+      message += `Generate anyway? (May fail or create an oversized QR code)`;
+      
+      const shouldContinue = confirm(message);
+      if (!shouldContinue) {
+        return;
+      }
+    }
+    
+    // Update QR code size and regenerate
+    const qrCanvas = document.getElementById('mainQR') as HTMLCanvasElement;
+    if (qrCanvas) {
+      qrCanvas.width = size;
+      qrCanvas.height = size;
+      qrCanvas.dataset.qrSize = size.toString();
+      qrCanvas.dataset.qrErrorLevel = errorLevel;
+    }
+
+    // Generate QR code
+    if (window.QRCode) {
+      window.QRCode.byId('mainQR').update(text);
+      currentText = text;
+      
+      // Update info and enable actions
+      updateQRInfo(text, size, errorLevel);
+      downloadBtn.disabled = false;
+      copyBtn.disabled = false;
+      shareBtn.disabled = false;
+      qrInfo.style.display = 'block';
+    }
+  });
+
+  // Download QR Code as PNG
+  downloadBtn.addEventListener('click', () => {
+    const canvas = document.getElementById('mainQR') as HTMLCanvasElement;
+    if (canvas && currentText) {
+      const link = document.createElement('a');
+      link.download = `qrcode-${Date.now()}.png`;
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+  });
+
+  // Copy QR Code to Clipboard
+  copyBtn.addEventListener('click', async () => {
+    const canvas = document.getElementById('mainQR') as HTMLCanvasElement;
+    if (canvas && currentText) {
+      try {
+        canvas.toBlob(async (blob) => {
+          if (blob) {
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            // Visual feedback
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = '✅ Copied!';
+            setTimeout(() => {
+              copyBtn.textContent = originalText;
+            }, 2000);
+          }
+        });
+      } catch (error) {
+        console.error('Failed to copy to clipboard:', error);
+        alert('Failed to copy to clipboard. You can use the download button instead.');
+      }
+    }
+  });
+
+  // Share Link
+  shareBtn.addEventListener('click', () => {
+    if (currentText) {
+      try {
+        const currentSize = parseInt(sizeInput.value) || DEFAULT_QR_SIZE;
+        const currentErrorLevel = errorSelect.value;
+        
+        const params = new URLSearchParams();
+        params.set('text', currentText);
+        params.set('size', currentSize.toString());
+        params.set('errorLevel', currentErrorLevel);
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+        
+        // Copy settings URL to clipboard
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          // Visual feedback
+          const originalText = shareBtn.textContent;
+          shareBtn.textContent = '✅ URL Copied!';
+          setTimeout(() => {
+            shareBtn.textContent = originalText;
+          }, 2000);
+        }).catch(() => {
+          // Fallback: show the URL in a prompt
+          prompt('Copy this settings URL:', shareUrl);
+        });
+      } catch (error) {
+        console.error('Failed to generate share link:', error);
+        alert('Failed to generate share link.');
+      }
+    }
+  });
+
+  // Update QR Info
+  function updateQRInfo(text: string, size: number, errorLevel: string) {
+    infoContent.textContent = text.length > 30 ? text.substring(0, 30) + '...' : text;
+    infoContent.title = text; // Show full text on hover
+    infoSize.textContent = `${size}x${size}px`;
+    
+    const errorLabels: Record<string, string> = {
+      'L': 'Low (~7%)',
+      'M': 'Medium (~15%)',
+      'Q': 'Quartile (~25%)',
+      'H': 'High (~30%)'
+    };
+    infoError.textContent = errorLabels[errorLevel] || errorLevel;
+    
+    // Calculate and display data usage
+    const usage = calculateDataUsage(text, errorLevel);
+    const usageColor = usage.percentage > 90 ? '#ff4444' : usage.percentage > 75 ? '#ff8800' : '#00aa00';
+    infoUsage.textContent = `${usage.current}/${usage.max} bytes (${usage.percentage}%)`;
+    infoUsage.style.color = usageColor;
+    
+    // Show warning if approaching limit
+    if (usage.percentage > 100) {
+      infoUsage.title = 'Error: Exceeds maximum QR code capacity for this error correction level!';
+    } else if (usage.percentage > 90) {
+      infoUsage.title = 'Warning: Approaching QR code capacity limit!';
+    } else if (usage.percentage > 75) {
+      infoUsage.title = 'Caution: High data usage for this error correction level';
+    } else {
+      infoUsage.title = 'Data usage within safe limits';
+    }
+  }
+
+  // Generate from URL parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlText = urlParams.get('text');
+  const urlSize = urlParams.get('size');
+  const urlErrorLevel = urlParams.get('errorLevel') || urlParams.get('error');
+  
+  let hasValidParams = false;
+  
+  // Set initial values from URL parameters and validate
+  if (urlText && urlText.trim()) {
+    textInput.value = urlText;
+    hasValidParams = true;
+  }
+  
+  if (urlSize) {
+    const size = parseInt(urlSize);
+    if (!isNaN(size) && size >= 100 && size <= 2000) {
+      sizeInput.value = size.toString();
+    }
+  }
+  
+  if (urlErrorLevel && ['L', 'M', 'Q', 'H'].includes(urlErrorLevel.toUpperCase())) {
+    errorSelect.value = urlErrorLevel.toUpperCase();
+  }
+  
+  // Auto-generate if we have valid text and parameters are valid
+  if (hasValidParams && urlText && urlText.trim()) {
+    // Use setTimeout to ensure DOM is ready and QRCode component is initialized
+    setTimeout(() => {
+      updateDataUsageDisplay(); // Update usage display first
+      generateBtn.click();
+    }, 100);
+  }
+  
+  // Initial display update
+  setTimeout(updateDataUsageDisplay, 50);
+</script>
+
+<style>
+  .container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  .tool-header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .tool-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .tool-description {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  .tool-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    margin-bottom: 3rem;
+  }
+
+  .input-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+  }
+
+  .input-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .input-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .input-group textarea,
+  .input-group select,
+  .input-group input[type="number"] {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease;
+  }
+
+  .input-group textarea:focus,
+  .input-group select:focus,
+  .input-group input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  /* Number input specific styling */
+  .input-group input[type="number"] {
+    -moz-appearance: textfield; /* Firefox */
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  .input-group input[type="number"]::-webkit-outer-spin-button,
+  .input-group input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .input-group textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: white;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .btn-secondary {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .output-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .qr-container {
+    margin-bottom: 2rem;
+    display: flex;
+    justify-content: center;
+  }
+
+  .qr-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-bottom: 2rem;
+  }
+
+  .qr-info {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    text-align: left;
+  }
+
+  .info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-secondary);
+  }
+
+  .info-item:last-child {
+    border-bottom: none;
+  }
+
+  .info-item .label {
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .info-item .value {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    word-break: break-all;
+    overflow-wrap: break-word;
+    max-width: 200px;
+  }
+
+  .suggestion-area {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: linear-gradient(135deg, #fff7e6, #fff3cd);
+    border: 1px solid #ffc107;
+    border-radius: var(--radius-md);
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .suggestion-content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .suggestion-icon {
+    font-size: 1.2rem;
+  }
+
+  .suggestion-text {
+    flex: 1;
+    font-size: 0.9rem;
+    color: #664d03;
+  }
+
+  .suggestion-btn {
+    padding: 0.5rem 1rem;
+    background: #ffc107;
+    color: #664d03;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .suggestion-btn:hover {
+    background: #ffca2c;
+    transform: translateY(-1px);
+  }
+
+
+  @media (max-width: 768px) {
+    .tool-content {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+
+    .options-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .qr-actions {
+      flex-direction: column;
+    }
+  }
+</style>
