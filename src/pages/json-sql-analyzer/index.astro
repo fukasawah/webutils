@@ -1,0 +1,2246 @@
+---
+import Layout from "../../layouts/Layout.astro";
+---
+
+<Layout title="JSON SQL Analyzer - Web Toolbox" currentTool="json-sql-analyzer">
+  <div class="tool-container">
+    <div class="tool-header">
+      <h1>🗄️ JSON SQL Analyzer</h1>
+      <p>Analyze JSON/JSONL data with SQL using DuckDB in the browser</p>
+    </div>
+
+    <!-- Data Input Section -->
+    <div class="glass-card tool-section">
+      <div class="section-header">
+        <h2>📥 Data Input</h2>
+      </div>
+
+      <div class="control-section">
+        <div class="input-tabs">
+          <button class="tab-button active" data-tab="file">File Upload</button>
+          <button class="tab-button" data-tab="text">Text Input</button>
+        </div>
+
+        <div class="table-input-section" id="table-input-section">
+          <label for="table-name">Table Name</label>
+          <input
+            type="text"
+            id="table-name"
+            placeholder="eg. my_data"
+            value="main_table"
+          />
+        </div>
+
+        <div class="tab-content">
+          <div class="tab-pane active" id="file-tab">
+            <input type="file" id="file-input" accept=".json,.jsonl" style="display: none;" />
+            <div class="file-input-section">
+              <button id="file-select-btn" class="file-select-button">📁 Select JSON/JSONL File</button>
+              <div class="file-info" id="file-info" style="display: none;">
+                <span id="file-name"></span>
+                <button id="load-file-data" class="load-button">Load File</button>
+              </div>
+            </div>
+            <small class="file-format-info">Supported formats: JSON arrays, JSON objects, JSONL (one JSON per line)</small>
+          </div>
+
+          <div class="tab-pane" id="text-tab">
+            <div class="sample-section">
+              <div class="sample-selector">
+                <label for="sample-select">Choose sample data:</label>
+                <select id="sample-select">
+                  <option value="">Select sample data...</option>
+                  <option value="users">👥 Users (JSONL)</option>
+                  <option value="orders">📦 Orders (JSONL)</option>
+                  <option value="products">🛍️ Products (JSON Array)</option>
+                </select>
+              </div>
+            </div>
+
+            <textarea
+              id="text-input"
+              placeholder='eg. [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]'
+              rows="8"></textarea>
+            <button id="load-text-data" class="load-button">Load Data</button>
+          </div>
+        </div>
+
+        <div class="data-info" id="data-info" style="display: none;">
+          <p>
+            Data loaded: <span id="data-format"></span>, <span id="data-rows"
+            ></span> rows into table <strong
+              ><span id="data-table"></span></strong
+            >
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SQL Query Section -->
+    <div class="glass-card tool-section">
+      <div class="section-header">
+        <h2>🔍 SQL Query</h2>
+        <div class="section-actions">
+          <button id="show-tables-btn" class="info-button">Show Tables</button>
+          <button id="clear-all-data-btn" class="danger-button">🗑️ Clear All Data</button>
+        </div>
+      </div>
+
+      <div class="control-section">
+        <textarea
+          id="sql-editor"
+          placeholder="eg. SELECT * FROM main_table LIMIT 10;"
+          rows="6"></textarea>
+
+        <div class="editor-footer">
+          <button id="execute-btn" class="execute-button" disabled
+            >Execute Query</button
+          >
+          <button id="clear-btn" class="clear-button">Clear</button>
+          <button id="share-btn" class="clear-button">Share Query</button>
+          <div class="query-history">
+            <button id="history-btn" class="history-button">History ▼</button>
+            <div class="history-dropdown" id="history-dropdown"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Section - moved close to SQL Query -->
+    <div class="glass-card tool-results">
+      <div class="result-header">
+        <h3>📊 Results</h3>
+        <div class="export-buttons" style="display: none;" id="export-buttons">
+          <button id="export-json" class="btn btn-secondary">Export JSON</button
+          >
+          <button id="export-csv" class="btn btn-secondary">Export CSV</button>
+        </div>
+      </div>
+
+      <div class="result-content">
+        <div class="results-info" id="results-info" style="display: none;">
+        </div>
+        <div class="results-container" id="results-container">
+          <div class="placeholder">Execute a query to see results</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Database States Section - moved after Results -->
+    <div class="glass-card tool-section">
+      <div class="section-header">
+        <h2>💾 Database States</h2>
+        <p class="section-subtitle">
+          Save and restore your data analysis sessions
+        </p>
+      </div>
+
+      <div class="control-section">
+        <div class="state-management">
+          <div class="state-save">
+            <label for="state-name">Save current state as:</label>
+            <div class="state-save-controls">
+              <input
+                type="text"
+                id="state-name"
+                placeholder="eg. my_analysis"
+              />
+              <button id="save-state-btn" class="state-button">Save</button>
+            </div>
+          </div>
+
+          <div class="state-load">
+            <label for="saved-states">Load saved state:</label>
+            <div class="state-load-controls">
+              <select id="saved-states">
+                <option value="">No saved states</option>
+              </select>
+              <button id="load-state-btn" class="state-button" disabled
+                >Load</button
+              >
+              <button
+                id="delete-state-btn"
+                class="state-button state-danger"
+                disabled>Delete</button
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+</Layout>
+
+<style>
+  .tool-section {
+    margin-bottom: 2rem;
+  }
+
+  .tool-section:last-child {
+    margin-bottom: 1rem;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--border-primary);
+  }
+
+  .section-header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .section-subtitle {
+    margin: 0.5rem 0 0 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+
+  .section-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .info-button {
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .info-button:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+  }
+
+  .danger-button {
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    color: #dc3545;
+    border: 1px solid #dc3545;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+  }
+
+  .danger-button:hover {
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+  }
+
+  .control-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .control-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .control-section h3 {
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+  }
+
+  .input-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .tab-content {
+    margin-top: 1rem;
+  }
+
+  .tab-button {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+  }
+
+  .tab-button.active {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+  }
+
+  .tab-button:hover:not(.active) {
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+
+  .tab-pane {
+    display: none;
+  }
+
+  .tab-pane.active {
+    display: block;
+  }
+
+  .file-input-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .file-select-button {
+    padding: 1rem 1.5rem;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    text-align: center;
+  }
+
+  .file-select-button:hover {
+    background: var(--accent-secondary, #0056b3);
+    transform: translateY(-1px);
+  }
+
+  .file-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-primary);
+  }
+
+  .file-info #file-name {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .file-format-info {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+
+  #text-input,
+  #sql-editor {
+    width: 100%;
+    padding: 1rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    resize: vertical;
+    transition: all 0.2s ease;
+  }
+
+  #text-input:focus,
+  #sql-editor:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  #text-input::placeholder,
+  #sql-editor::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .sample-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .sample-section h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+    color: var(--text-primary);
+  }
+
+  .sample-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .sample-button {
+    padding: 0.5rem 1rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-primary);
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .sample-button:hover {
+    background: var(--accent-primary);
+    color: white;
+  }
+
+  .load-button {
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.2s ease;
+  }
+
+  .load-button:hover {
+    background: var(--accent-secondary, #0056b3);
+  }
+
+  .load-button:disabled {
+    background: var(--text-muted);
+    cursor: not-allowed;
+  }
+
+  .sample-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .sample-selector label {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .sample-selector select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+  }
+
+  .table-input-section {
+    margin-top: 1rem;
+  }
+
+  .table-input-section label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  #table-name {
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  #table-name:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .data-info {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-success-light, #d1f2eb);
+    border: 1px solid var(--border-success, #a7d7c5);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    color: var(--text-success, #155724);
+  }
+
+  .editor-footer {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-top: 1rem;
+  }
+
+  .execute-button {
+    padding: 0.75rem 1.5rem;
+    background: var(--accent-success, #28a745);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .execute-button:hover:not(:disabled) {
+    background: #16a34a;
+    transform: translateY(-1px);
+  }
+
+  .execute-button:disabled {
+    background: var(--bg-muted, #ccc);
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .clear-button,
+  .history-button {
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary, #f8f9fa);
+    color: var(--text-secondary, #6c757d);
+    border: 1px solid var(--border-primary, #ddd);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+  }
+
+  .clear-button:hover,
+  .history-button:hover {
+    background: var(--bg-card, white);
+    color: var(--text-primary, #333);
+    border-color: var(--border-accent, #007acc);
+  }
+
+  .query-history {
+    position: relative;
+    margin-left: auto;
+  }
+
+  .history-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 350px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+  }
+
+  .history-item {
+    padding: 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-secondary, #e9ecef);
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    transition: background 0.2s ease;
+    word-break: break-all;
+    line-height: 1.4;
+  }
+
+  .history-item:last-child {
+    border-bottom: none;
+  }
+
+  .history-item:hover {
+    background: var(--bg-secondary);
+  }
+
+  .history-item:active {
+    background: var(--accent-primary);
+    color: white;
+  }
+
+  .results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .export-button {
+    margin-left: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #007acc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .results-container {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: white;
+    min-height: 200px;
+  }
+
+  .placeholder {
+    padding: 2rem;
+    text-align: center;
+    color: #666;
+  }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  .results-table th,
+  .results-table td {
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .results-table th {
+    background: #f0f0f0;
+    font-weight: bold;
+    position: sticky;
+    top: 0;
+  }
+
+  .json-cell {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .json-expandable {
+    cursor: pointer;
+    color: #007acc;
+  }
+
+  .status {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 1rem;
+    border-radius: 4px;
+    display: none;
+    z-index: 1000;
+  }
+
+  .status.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+  }
+
+  .status.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+  }
+
+  .status.info {
+    background: var(--bg-info-light, #d1ecf1);
+    color: var(--text-info, #0c5460);
+    border: 1px solid var(--border-info, #bee5eb);
+  }
+
+  .sample-examples {
+    margin-top: 1.5rem;
+  }
+
+  .export-buttons {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .export-buttons button {
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+  }
+
+  .export-buttons button:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+  }
+
+  .results-info {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    border-left: 4px solid var(--accent-success, #28a745);
+  }
+
+  .results-container {
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    min-height: 250px;
+    overflow: auto;
+    max-height: 500px;
+  }
+
+  .placeholder {
+    padding: 3rem 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 1.1rem;
+  }
+
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .results-table th,
+  .results-table td {
+    padding: 0.75rem;
+    border: none;
+    border-bottom: 1px solid var(--border-secondary, #e9ecef);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .results-table th {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--accent-primary);
+  }
+
+  .results-table td {
+    color: var(--text-primary);
+    transition: background 0.2s ease;
+  }
+
+  .results-table tr:hover td {
+    background: var(--bg-secondary);
+  }
+
+  .results-table tr:nth-child(even) {
+    background: var(--bg-tertiary);
+  }
+
+  .results-table tr:nth-child(even):hover {
+    background: var(--bg-secondary);
+  }
+
+  .json-cell {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .json-expandable {
+    cursor: pointer;
+    color: var(--accent-primary);
+    transition: color 0.2s ease;
+  }
+
+  .json-expandable:hover {
+    color: var(--accent-secondary, #0056b3);
+    text-decoration: underline;
+  }
+
+  .error-result {
+    padding: 2rem;
+    text-align: center;
+    background: var(--bg-error-light, #fff2f2);
+    border: 1px solid var(--border-error, #ffcdd2);
+    border-radius: var(--radius-md);
+    margin: 1rem 0;
+  }
+
+  .error-icon {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  .error-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--accent-error, #d32f2f);
+    margin-bottom: 1rem;
+  }
+
+  .error-message {
+    font-family: var(--font-mono);
+    background: var(--bg-error-code, #ffebee);
+    border: 1px solid var(--border-error-code, #ffcdd2);
+    border-radius: var(--radius-sm);
+    padding: 1rem;
+    margin: 1rem 0;
+    color: var(--text-error, #c62828);
+    font-size: 0.9rem;
+    line-height: 1.4;
+    word-break: break-word;
+    text-align: left;
+  }
+
+  .error-hint {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 1rem;
+  }
+
+  .state-management {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .state-save,
+  .state-load {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .state-save-controls,
+  .state-load-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .state-save-controls input,
+  .state-load-controls select {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+  }
+
+  .state-button {
+    padding: 0.5rem 1rem;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .state-button:hover:not(:disabled) {
+    background: var(--accent-secondary, #0056b3);
+    transform: translateY(-1px);
+  }
+
+  .state-button:disabled {
+    background: var(--bg-muted, #ccc);
+    cursor: not-allowed;
+    opacity: 0.6;
+    transform: none;
+  }
+
+  .state-button.state-danger {
+    background: var(--accent-error, #dc3545);
+  }
+
+  .state-button.state-danger:hover:not(:disabled) {
+    background: var(--accent-error-dark, #c82333);
+  }
+
+  .state-save label,
+  .state-load label {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 768px) {
+    .editor-footer {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .query-history {
+      margin-left: 0;
+    }
+
+    .sample-buttons {
+      flex-direction: column;
+    }
+
+    .state-save-controls,
+    .state-load-controls {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .state-button {
+      width: 100%;
+    }
+  }
+</style>
+
+<script>
+  import * as duckdb from "@duckdb/duckdb-wasm";
+  import duckdb_wasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
+  import mvp_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
+  import duckdb_wasm_eh from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
+  import eh_worker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
+
+  interface QueryResult {
+    data: any[];
+    columns: { name: string; type: string }[];
+    rowCount: number;
+  }
+
+  interface DatabaseState {
+    name: string;
+    tables: {
+      [tableName: string]: {
+        data: any[];
+        format: string;
+        rowCount: number;
+      };
+    };
+    timestamp: number;
+  }
+
+  const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
+    mvp: {
+      mainModule: duckdb_wasm,
+      mainWorker: mvp_worker,
+    },
+    eh: {
+      mainModule: duckdb_wasm_eh,
+      mainWorker: eh_worker,
+    },
+  };
+
+  class JSONSQLAnalyzer {
+    private db: duckdb.AsyncDuckDB | null = null;
+    private connection: duckdb.AsyncDuckDBConnection | null = null;
+    private isInitialized = false;
+    private queryHistory: string[] = [];
+    private currentResults: QueryResult | null = null;
+    private loadedTables: Set<string> = new Set();
+    private tablesData: Map<
+      string,
+      { data: any[]; format: string; rowCount: number }
+    > = new Map();
+
+    constructor() {
+      this.queryHistory = this.loadQueryHistory();
+
+      this.initializeDuckDB();
+      this.setupEventListeners();
+      this.updateHistoryDropdown();
+      this.updateSavedStatesDropdown();
+
+      // Auto-restore last session if available
+      setTimeout(() => {
+        this.tryRestoreLastSession();
+      }, 1000); // Wait for DuckDB to initialize
+
+      const urlQuery = this.getQueryFromURL();
+      if (urlQuery) {
+        const sqlEditor = document.getElementById(
+          "sql-editor",
+        ) as HTMLTextAreaElement;
+        if (sqlEditor) {
+          sqlEditor.value = urlQuery;
+          // Enable execute button if query is loaded from URL
+          setTimeout(() => {
+            this.enableExecuteButton();
+          }, 100);
+        }
+      }
+    }
+
+    private async initializeDuckDB(): Promise<void> {
+      this.showStatus("Initializing DuckDB...", "info");
+
+      try {
+        const bundle = await duckdb.selectBundle(MANUAL_BUNDLES);
+        const worker = new Worker(bundle.mainWorker!);
+        const logger = new duckdb.ConsoleLogger();
+        this.db = new duckdb.AsyncDuckDB(logger, worker);
+
+        // SharedArrayBuffer support check with fallback
+        if (typeof SharedArrayBuffer !== "undefined" && bundle.pthreadWorker) {
+          await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+        } else {
+          await this.db.instantiate(bundle.mainModule);
+        }
+
+        this.connection = await this.db.connect();
+        this.isInitialized = true;
+        this.showStatus("DuckDB initialized successfully", "success");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showStatus(`Failed to initialize: ${message}`, "error");
+      }
+    }
+
+    private detectDataFormat(text: string): { format: string; data: any[] } {
+      const trimmedText = text.trim();
+      if (!trimmedText) {
+        throw new Error("Empty data");
+      }
+
+      // Try JSON first (array or object)
+      try {
+        const parsed = JSON.parse(trimmedText);
+        if (Array.isArray(parsed)) {
+          return { format: "json-array", data: parsed };
+        } else if (typeof parsed === "object" && parsed !== null) {
+          return { format: "json-object", data: [parsed] };
+        }
+        throw new Error("Invalid JSON structure");
+      } catch (jsonError) {
+        // If JSON parsing fails, try JSONL
+        const lines = trimmedText.split("\n").filter((line) => line.trim());
+        if (lines.length === 0) {
+          throw new Error("Empty data");
+        }
+
+        // Check if all lines are valid JSON objects
+        try {
+          const jsonlData = lines.map((line, index) => {
+            try {
+              const parsed = JSON.parse(line.trim());
+              if (
+                typeof parsed !== "object" ||
+                parsed === null ||
+                Array.isArray(parsed)
+              ) {
+                throw new Error(`Line ${index + 1} is not a valid JSON object`);
+              }
+              return parsed;
+            } catch (lineError) {
+              throw new Error(
+                `Line ${index + 1}: ${lineError instanceof Error ? lineError.message : String(lineError)}`,
+              );
+            }
+          });
+          return { format: "jsonl", data: jsonlData };
+        } catch (jsonlError) {
+          // If both JSON and JSONL fail, provide helpful error
+          const jsonErrorMsg =
+            jsonError instanceof Error ? jsonError.message : String(jsonError);
+          const jsonlErrorMsg =
+            jsonlError instanceof Error
+              ? jsonlError.message
+              : String(jsonlError);
+          throw new Error(
+            `Format error: Not valid JSON (${jsonErrorMsg}) or JSONL (${jsonlErrorMsg})`,
+          );
+        }
+      }
+    }
+
+    private async loadJSONData(
+      data: any[],
+      tableName = "main_table",
+    ): Promise<number> {
+      if (!this.db || !this.connection) {
+        throw new Error("DuckDB not initialized");
+      }
+
+      // Check if table exists and drop it if it does
+      if (this.loadedTables.has(tableName)) {
+        try {
+          await this.connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+        } catch (error) {
+          console.warn(`Failed to drop existing table ${tableName}:`, error);
+        }
+      }
+
+      const dataText = JSON.stringify(data);
+      await this.db.registerFileText("data.json", dataText);
+      
+      // Use read_json_auto for better type handling with mixed/null values
+      await this.connection.query(`
+        CREATE TABLE ${tableName} AS 
+        SELECT * FROM read_json_auto('data.json', union_by_name=true)
+      `);
+
+      // Add to loaded tables set and store table data
+      this.loadedTables.add(tableName);
+      this.tablesData.set(tableName, {
+        data: data,
+        format: "unknown", // Will be set by caller
+        rowCount: data.length,
+      });
+
+      const result = await this.connection.query(
+        `SELECT COUNT(*) as count FROM ${tableName}`,
+      );
+      const resultArray = result.toArray();
+      return resultArray[0].count as number;
+    }
+
+    private async executeSQL(sql: string): Promise<QueryResult> {
+      if (!this.connection) {
+        throw new Error("DuckDB not initialized");
+      }
+
+      const result = await this.connection.query(sql);
+      const data = result.toArray();
+      const columns = result.schema.fields.map((field) => ({
+        name: field.name,
+        type: field.type.toString(),
+      }));
+
+      return {
+        data,
+        columns,
+        rowCount: data.length,
+      };
+    }
+
+    private setupEventListeners(): void {
+      // Tab switching
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.addEventListener("click", (e) => {
+          const target = e.target as HTMLElement;
+          if (target.dataset.tab) {
+            this.switchTab(target.dataset.tab);
+          }
+        });
+      });
+
+      // File input
+      const fileInput = document.getElementById(
+        "file-input",
+      ) as HTMLInputElement;
+      const fileSelectBtn = document.getElementById("file-select-btn");
+      const loadFileDataBtn = document.getElementById("load-file-data");
+      let selectedFile: File | null = null;
+
+      if (fileSelectBtn) {
+        fileSelectBtn.addEventListener("click", () => {
+          fileInput?.click();
+        });
+      }
+
+      if (fileInput) {
+        fileInput.addEventListener("change", (e) => {
+          const target = e.target as HTMLInputElement;
+          if (target.files && target.files[0]) {
+            selectedFile = target.files[0];
+            this.displaySelectedFile(selectedFile);
+          }
+        });
+      }
+
+      if (loadFileDataBtn) {
+        loadFileDataBtn.addEventListener("click", () => {
+          if (selectedFile) {
+            this.handleFileSelect(selectedFile);
+          }
+        });
+      }
+
+      // Text input
+      const textInput = document.getElementById(
+        "text-input",
+      ) as HTMLTextAreaElement;
+      if (textInput) {
+        textInput.addEventListener("input", () => {
+          this.enableExecuteButton();
+        });
+      }
+
+      // Sample data select
+      const sampleSelect = document.getElementById(
+        "sample-select",
+      ) as HTMLSelectElement;
+      if (sampleSelect) {
+        sampleSelect.addEventListener("change", (e) => {
+          const target = e.target as HTMLSelectElement;
+          if (target.value) {
+            this.fillSampleData(target.value);
+          }
+        });
+      }
+
+      // Load text data button
+      const loadTextButton = document.getElementById("load-text-data");
+      if (loadTextButton) {
+        loadTextButton.addEventListener("click", () => {
+          this.loadTextData();
+        });
+      }
+
+      // Table name input
+      const tableNameInput = document.getElementById(
+        "table-name",
+      ) as HTMLInputElement;
+      if (tableNameInput) {
+        tableNameInput.addEventListener("input", () => {
+          // Validate table name (simple validation)
+          const tableName = tableNameInput.value.trim();
+          if (tableName && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+            tableNameInput.style.borderColor = "";
+          } else if (tableName) {
+            tableNameInput.style.borderColor = "var(--accent-error)";
+          }
+        });
+      }
+
+      // Example tab switching
+
+      // SQL editor
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (sqlEditor) {
+        sqlEditor.addEventListener("input", () => this.enableExecuteButton());
+        sqlEditor.addEventListener("keydown", (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            this.executeQuery();
+          }
+        });
+      }
+
+      // Buttons
+      const executeBtn = document.getElementById("execute-btn");
+      const clearBtn = document.getElementById("clear-btn");
+      const shareBtn = document.getElementById("share-btn");
+      const historyBtn = document.getElementById("history-btn");
+      const exportJsonBtn = document.getElementById("export-json");
+      const exportCsvBtn = document.getElementById("export-csv");
+
+      if (executeBtn)
+        executeBtn.addEventListener("click", () => this.executeQuery());
+      if (clearBtn) clearBtn.addEventListener("click", () => this.clearQuery());
+      if (shareBtn) shareBtn.addEventListener("click", () => this.shareQuery());
+      if (historyBtn)
+        historyBtn.addEventListener("click", () => this.toggleHistory());
+      if (exportJsonBtn)
+        exportJsonBtn.addEventListener("click", () =>
+          this.exportResults("json"),
+        );
+      if (exportCsvBtn)
+        exportCsvBtn.addEventListener("click", () => this.exportResults("csv"));
+
+      // State management buttons
+      const saveStateBtn = document.getElementById("save-state-btn");
+      const loadStateBtn = document.getElementById("load-state-btn");
+      const deleteStateBtn = document.getElementById("delete-state-btn");
+      const savedStatesDropdown = document.getElementById(
+        "saved-states",
+      ) as HTMLSelectElement;
+
+      if (saveStateBtn) {
+        saveStateBtn.addEventListener("click", () => {
+          const stateNameInput = document.getElementById(
+            "state-name",
+          ) as HTMLInputElement;
+          if (stateNameInput) {
+            this.saveState(stateNameInput.value.trim());
+            stateNameInput.value = ""; // Clear input after saving
+          }
+        });
+      }
+
+      if (loadStateBtn) {
+        loadStateBtn.addEventListener("click", () => {
+          if (savedStatesDropdown && savedStatesDropdown.value) {
+            this.loadState(savedStatesDropdown.value);
+          }
+        });
+      }
+
+      if (deleteStateBtn) {
+        deleteStateBtn.addEventListener("click", () => {
+          if (savedStatesDropdown && savedStatesDropdown.value) {
+            this.deleteState(savedStatesDropdown.value);
+          }
+        });
+      }
+
+      if (savedStatesDropdown) {
+        savedStatesDropdown.addEventListener("change", () => {
+          const loadBtn = document.getElementById(
+            "load-state-btn",
+          ) as HTMLButtonElement;
+          const deleteBtn = document.getElementById(
+            "delete-state-btn",
+          ) as HTMLButtonElement;
+
+          const hasSelection = savedStatesDropdown.value !== "";
+          if (loadBtn) loadBtn.disabled = !hasSelection;
+          if (deleteBtn) deleteBtn.disabled = !hasSelection;
+        });
+      }
+
+      // Show Tables button
+      const showTablesBtn = document.getElementById("show-tables-btn");
+      if (showTablesBtn) {
+        showTablesBtn.addEventListener("click", () => {
+          this.insertShowTablesQuery();
+        });
+      }
+
+      // Clear All Data button
+      const clearAllDataBtn = document.getElementById("clear-all-data-btn");
+      if (clearAllDataBtn) {
+        clearAllDataBtn.addEventListener("click", () => {
+          this.clearAllData();
+        });
+      }
+    }
+
+    private switchTab(tabName: string): void {
+      document
+        .querySelectorAll(".tab-button")
+        .forEach((btn) => btn.classList.remove("active"));
+      document
+        .querySelectorAll(".tab-pane")
+        .forEach((pane) => pane.classList.remove("active"));
+
+      const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
+      const tabPane = document.getElementById(`${tabName}-tab`);
+
+      if (tabButton) tabButton.classList.add("active");
+      if (tabPane) tabPane.classList.add("active");
+    }
+
+    private displaySelectedFile(file: File): void {
+      const fileInfo = document.getElementById("file-info");
+      const fileName = document.getElementById("file-name");
+      
+      if (fileInfo && fileName) {
+        fileName.textContent = file.name;
+        fileInfo.style.display = "flex";
+        
+        // Auto-populate table name from filename (without extension)
+        const tableNameInput = document.getElementById("table-name") as HTMLInputElement;
+        if (tableNameInput) {
+          const baseName = file.name.replace(/\.(json|jsonl)$/i, '');
+          tableNameInput.value = baseName.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
+        }
+      }
+    }
+
+    private async handleFileSelect(file: File): Promise<void> {
+      if (!file.name.match(/\.(json|jsonl)$/i)) {
+        this.showStatus("Please select a JSON or JSONL file", "error");
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        
+        // Get table name from input field (was auto-populated from filename)
+        const tableNameInput = document.getElementById("table-name") as HTMLInputElement;
+        const tableName = tableNameInput?.value.trim() || "main_table";
+        
+        await this.loadData(text, tableName);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showStatus(`Failed to read file: ${message}`, "error");
+        this.displayError(`Failed to read file: ${message}`);
+      }
+    }
+
+    private async loadData(
+      text: string,
+      customTableName?: string,
+    ): Promise<void> {
+      if (!text.trim()) {
+        this.showStatus("No data provided", "error");
+        return;
+      }
+
+      if (!this.isInitialized) {
+        this.showStatus("DuckDB is still initializing, please wait...", "info");
+        return;
+      }
+
+      this.showStatus("Loading data...", "info");
+
+      try {
+        const formatResult = this.detectDataFormat(text);
+
+        // Get table name from input or use default
+        const tableNameInput = document.getElementById(
+          "table-name",
+        ) as HTMLInputElement;
+        const tableName =
+          customTableName || tableNameInput?.value.trim() || "main_table";
+
+        // Validate table name
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+          throw new Error(
+            "Invalid table name. Use letters, numbers, and underscores only. Must start with letter or underscore.",
+          );
+        }
+
+        const rowCount = await this.loadJSONData(formatResult.data, tableName);
+
+        // Update the format in stored table data
+        if (this.tablesData.has(tableName)) {
+          const tableData = this.tablesData.get(tableName)!;
+          tableData.format = formatResult.format;
+          this.tablesData.set(tableName, tableData);
+        }
+
+        const dataFormat = document.getElementById("data-format");
+        const dataRows = document.getElementById("data-rows");
+        const dataTable = document.getElementById("data-table");
+        const dataInfo = document.getElementById("data-info");
+
+        if (dataFormat) dataFormat.textContent = formatResult.format;
+        if (dataRows) dataRows.textContent = rowCount.toString();
+        if (dataTable) dataTable.textContent = tableName;
+        if (dataInfo) dataInfo.style.display = "block";
+
+        // Update table name input value
+        if (tableNameInput) {
+          tableNameInput.value = tableName;
+          tableNameInput.style.borderColor = "";
+        }
+
+        // Update SQL editor first
+        const sqlEditor = document.getElementById(
+          "sql-editor",
+        ) as HTMLTextAreaElement;
+        if (sqlEditor && !sqlEditor.value.trim()) {
+          sqlEditor.value = `SELECT * FROM ${tableName} LIMIT 10;`;
+        }
+
+        // Enable execute button with a small delay to ensure all DOM updates are complete
+        setTimeout(() => {
+          this.enableExecuteButton();
+        }, 50);
+
+        this.showStatus(
+          `Data loaded successfully: ${rowCount} rows into ${tableName}`,
+          "success",
+        );
+
+        // Auto-save current session
+        setTimeout(() => {
+          this.saveCurrentSession();
+        }, 100);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showStatus(`Failed to load data: ${message}`, "error");
+      }
+    }
+
+    private fillSampleData(type: string): void {
+      const sampleTexts: { [key: string]: string } = {
+        users: `{"id": 1, "name": "Alice Johnson", "age": 28, "department": "Engineering", "salary": 75000}
+{"id": 2, "name": "Bob Smith", "age": 34, "department": "Marketing", "salary": 65000}
+{"id": 3, "name": "Carol Davis", "age": 29, "department": "Engineering", "salary": 80000}`,
+        orders: `{"order_id": 101, "customer_id": 1, "product": "Laptop", "quantity": 1, "price": 1200.0, "date": "2024-01-15"}
+{"order_id": 102, "customer_id": 2, "product": "Mouse", "quantity": 2, "price": 25.99, "date": "2024-01-16"}
+{"order_id": 103, "customer_id": 1, "product": "Keyboard", "quantity": 1, "price": 75.5, "date": "2024-01-17"}`,
+        products: `[
+  {"id": 1, "name": "Laptop", "category": "Electronics", "price": 1200.0, "in_stock": true, "metadata": {"brand": "TechCorp", "model": "X1"}},
+  {"id": 2, "name": "Mouse", "category": "Electronics", "price": 25.99, "in_stock": true, "metadata": {"brand": "ClickTech", "wireless": true}},
+  {"id": 3, "name": "Desk", "category": "Furniture", "price": 299.99, "in_stock": false, "metadata": {"material": "Wood", "color": "Oak"}}
+]`,
+      };
+
+      const sampleText = sampleTexts[type];
+      if (sampleText) {
+        // Fill text input but don't load data automatically
+        const textInput = document.getElementById(
+          "text-input",
+        ) as HTMLTextAreaElement;
+        if (textInput) {
+          textInput.value = sampleText;
+          textInput.focus();
+        }
+
+        // Auto-populate table name with sample data type
+        const tableNameInput = document.getElementById(
+          "table-name",
+        ) as HTMLInputElement;
+        if (tableNameInput) {
+          tableNameInput.value = type;
+          tableNameInput.style.borderColor = ""; // Reset any error styling
+        }
+      }
+    }
+
+    private loadTextData(): void {
+      const textInput = document.getElementById(
+        "text-input",
+      ) as HTMLTextAreaElement;
+      if (!textInput) return;
+
+      const text = textInput.value.trim();
+      if (!text) {
+        this.showStatus("Please enter some data first", "error");
+        return;
+      }
+
+      this.loadData(text);
+    }
+
+    private async executeQuery(): Promise<void> {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (!sqlEditor) return;
+
+      const sql = sqlEditor.value.trim();
+      if (!sql) return;
+
+      this.showStatus("Executing query...", "info");
+      const executeBtn = document.getElementById(
+        "execute-btn",
+      ) as HTMLButtonElement;
+      if (executeBtn) executeBtn.disabled = true;
+
+      // Always add to history (even if query fails)
+      this.addToHistory(sql);
+
+      try {
+        const result = await this.executeSQL(sql);
+
+        this.displayResults(result);
+        this.showStatus(
+          `Query executed successfully: ${result.rowCount} rows`,
+          "success",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.displayError(message);
+        this.showStatus(`Query failed: ${message}`, "error");
+      } finally {
+        this.enableExecuteButton();
+      }
+    }
+
+    private displayResults(result: QueryResult): void {
+      const container = document.getElementById("results-container");
+      const exportButtons = document.getElementById("export-buttons");
+      const info = document.getElementById("results-info");
+
+      if (!container || !exportButtons || !info) return;
+
+      if (result.rowCount === 0) {
+        container.innerHTML = '<div class="placeholder">No results found</div>';
+        exportButtons.style.display = "none";
+        info.style.display = "none";
+        return;
+      }
+
+      info.textContent = `${result.rowCount} rows, ${result.columns.length} columns`;
+      info.style.display = "block";
+      exportButtons.style.display = "flex";
+
+      const table = document.createElement("table");
+      table.className = "results-table";
+
+      // Create header
+      const thead = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      result.columns.forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = `${col.name} (${col.type})`;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // Create body
+      const tbody = document.createElement("tbody");
+      result.data.forEach((row) => {
+        const tr = document.createElement("tr");
+        result.columns.forEach((col) => {
+          const td = document.createElement("td");
+          const value = row[col.name];
+
+          if (typeof value === "object" && value !== null) {
+            td.className = "json-cell json-expandable";
+            td.textContent = JSON.stringify(value);
+            td.title = "Click to view full JSON";
+            td.addEventListener("click", () => {
+              alert(JSON.stringify(value, null, 2));
+            });
+          } else {
+            td.textContent = value === null ? "NULL" : String(value);
+          }
+
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      container.innerHTML = "";
+      container.appendChild(table);
+      this.currentResults = result;
+    }
+
+    private displayError(message: string): void {
+      const container = document.getElementById("results-container");
+      const exportButtons = document.getElementById("export-buttons");
+      const info = document.getElementById("results-info");
+
+      if (!container || !exportButtons || !info) return;
+
+      // Hide export buttons and info for errors
+      exportButtons.style.display = "none";
+      info.style.display = "none";
+
+      // Create error display
+      const errorDiv = document.createElement("div");
+      errorDiv.className = "error-result";
+      errorDiv.innerHTML = `
+        <div class="error-icon">❌</div>
+        <div class="error-title">SQL Query Error</div>
+        <div class="error-message">${this.escapeHtml(message)}</div>
+        <div class="error-hint">Check your SQL syntax and try again. Failed queries are still saved in history.</div>
+      `;
+
+      container.innerHTML = "";
+      container.appendChild(errorDiv);
+
+      // Clear current results since query failed
+      this.currentResults = null;
+    }
+
+    private escapeHtml(text: string): string {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    private clearQuery(): void {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (sqlEditor) {
+        sqlEditor.value = "";
+        this.enableExecuteButton();
+      }
+    }
+
+    private enableExecuteButton(): void {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      const executeBtn = document.getElementById(
+        "execute-btn",
+      ) as HTMLButtonElement;
+
+      if (!sqlEditor || !executeBtn) return;
+
+      const hasQuery = sqlEditor.value.trim() !== "";
+      executeBtn.disabled = !hasQuery;
+    }
+
+    private addToHistory(sql: string): void {
+      if (!this.queryHistory.includes(sql)) {
+        this.queryHistory.unshift(sql);
+        if (this.queryHistory.length > 100) {
+          this.queryHistory = this.queryHistory.slice(0, 100);
+        }
+        this.saveQueryHistory();
+        this.updateHistoryDropdown();
+      }
+    }
+
+    private loadQueryHistory(): string[] {
+      try {
+        return JSON.parse(
+          localStorage.getItem("json-sql-analyzer-history") || "[]",
+        );
+      } catch {
+        return [];
+      }
+    }
+
+    private saveQueryHistory(): void {
+      localStorage.setItem(
+        "json-sql-analyzer-history",
+        JSON.stringify(this.queryHistory),
+      );
+    }
+
+    private updateHistoryDropdown(): void {
+      const dropdown = document.getElementById("history-dropdown");
+      if (!dropdown) return;
+
+      dropdown.innerHTML = "";
+
+      if (this.queryHistory.length === 0) {
+        dropdown.innerHTML = '<div class="history-item">No history</div>';
+        return;
+      }
+
+      this.queryHistory.forEach((sql) => {
+        const item = document.createElement("div");
+        item.className = "history-item";
+        item.textContent = sql.length > 50 ? sql.substring(0, 50) + "..." : sql;
+        item.title = sql;
+        item.addEventListener("click", () => {
+          const sqlEditor = document.getElementById(
+            "sql-editor",
+          ) as HTMLTextAreaElement;
+          if (sqlEditor) {
+            sqlEditor.value = sql;
+            dropdown.style.display = "none";
+            this.enableExecuteButton();
+          }
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    private toggleHistory(): void {
+      const dropdown = document.getElementById("history-dropdown");
+      if (dropdown) {
+        dropdown.style.display =
+          dropdown.style.display === "block" ? "none" : "block";
+      }
+    }
+
+    private exportResults(format: string): void {
+      if (!this.currentResults || !this.currentResults.data.length) {
+        this.showStatus("No results to export", "error");
+        return;
+      }
+
+      let content: string;
+      let filename: string;
+      let mimeType: string;
+
+      if (format === "json") {
+        content = JSON.stringify(this.currentResults.data, null, 2);
+        filename = "query-results.json";
+        mimeType = "application/json";
+      } else if (format === "csv") {
+        const headers = this.currentResults.columns
+          .map((col) => col.name)
+          .join(",");
+        const rows = this.currentResults.data.map((row) =>
+          this.currentResults!.columns.map((col) => {
+            const value = row[col.name];
+            if (value === null) return "";
+            if (typeof value === "object") return JSON.stringify(value);
+            return String(value).replace(/"/g, '""');
+          }).join(","),
+        );
+        content = headers + "\n" + rows.join("\n");
+        filename = "query-results.csv";
+        mimeType = "text/csv";
+      } else {
+        return;
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    private getQueryFromURL(): string | null {
+      const params = new URLSearchParams(window.location.search);
+      const encodedQuery = params.get("q");
+      if (encodedQuery) {
+        try {
+          return atob(encodedQuery);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+
+    private shareQuery(): void {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (!sqlEditor) return;
+
+      const sql = sqlEditor.value.trim();
+      if (!sql) {
+        this.showStatus("No query to share", "error");
+        return;
+      }
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("q", btoa(sql));
+      navigator.clipboard.writeText(url.toString()).then(() => {
+        this.showStatus("Query URL copied to clipboard", "success");
+      });
+    }
+
+    private showStatus(message: string, type: string): void {
+      const status = document.getElementById("status");
+      if (!status) return;
+
+      status.textContent = message;
+      status.className = `status ${type}`;
+      status.style.display = "block";
+
+      setTimeout(
+        () => {
+          if (status) {
+            status.style.display = "none";
+          }
+        },
+        type === "error" ? 5000 : 3000,
+      );
+    }
+
+    public insertTableQuery(tableName: string): void {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (sqlEditor) {
+        sqlEditor.value = `SELECT * FROM ${tableName} LIMIT 10;`;
+        sqlEditor.focus();
+        this.enableExecuteButton();
+      }
+    }
+
+    private insertShowTablesQuery(): void {
+      const sqlEditor = document.getElementById(
+        "sql-editor",
+      ) as HTMLTextAreaElement;
+      if (sqlEditor) {
+        sqlEditor.value = "SHOW TABLES;";
+        sqlEditor.focus();
+        this.enableExecuteButton();
+      }
+    }
+
+    private async clearAllData(): Promise<void> {
+      // Confirmation dialog
+      const confirmed = confirm(
+        "Are you sure you want to clear all data? This action cannot be undone."
+      );
+      
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        // Show loading status
+        this.showStatus("Clearing all data...", "info");
+        
+        // Close existing connection and recreate DuckDB instance
+        if (this.connection) {
+          await this.connection.close();
+        }
+        if (this.db) {
+          await this.db.terminate();
+        }
+
+        // Reinitialize DuckDB
+        await this.initializeDuckDB();
+        
+        // Clear all UI data
+        this.clearDataInfo();
+        this.clearResults();
+        this.clearFileInfo();
+        this.resetTextInput();
+        
+        // Clear history
+        this.queryHistory = [];
+        this.updateHistoryDropdown();
+        
+        // Clear states
+        localStorage.removeItem('json_sql_analyzer_states');
+        this.updateSavedStatesDropdown();
+        
+        this.showStatus("All data cleared successfully", "success");
+      } catch (error) {
+        console.error("Error occurred while clearing data:", error);
+        this.showStatus("Error occurred while clearing data", "error");
+      }
+    }
+
+    private clearDataInfo(): void {
+      const dataInfo = document.getElementById("data-info");
+      if (dataInfo) {
+        dataInfo.style.display = "none";
+      }
+    }
+
+    private clearResults(): void {
+      const resultsContainer = document.getElementById("results-container");
+      if (resultsContainer) {
+        resultsContainer.innerHTML = "";
+      }
+    }
+
+    private clearFileInfo(): void {
+      const fileInfo = document.getElementById("file-info");
+      const fileInput = document.getElementById("file-input") as HTMLInputElement;
+      
+      if (fileInfo) {
+        fileInfo.style.display = "none";
+      }
+      if (fileInput) {
+        fileInput.value = "";
+      }
+    }
+
+    private resetTextInput(): void {
+      const textInput = document.getElementById("data-input") as HTMLTextAreaElement;
+      const tableNameInput = document.getElementById("table-name") as HTMLInputElement;
+      
+      if (textInput) {
+        textInput.value = "";
+      }
+      if (tableNameInput) {
+        tableNameInput.value = "main_table";
+      }
+      
+      // Switch back to file tab
+      this.switchTab("file");
+    }
+
+    // Database State Management Methods
+    private async serializeCurrentState(): Promise<DatabaseState> {
+      const tables: {
+        [tableName: string]: { data: any[]; format: string; rowCount: number };
+      } = {};
+
+      for (const [tableName, tableData] of this.tablesData) {
+        tables[tableName] = {
+          data: tableData.data,
+          format: tableData.format,
+          rowCount: tableData.rowCount,
+        };
+      }
+
+      return {
+        name: "",
+        tables: tables,
+        timestamp: Date.now(),
+      };
+    }
+
+    private async deserializeState(state: DatabaseState): Promise<void> {
+      if (!this.isInitialized) {
+        this.showStatus("DuckDB is still initializing, please wait...", "info");
+        return;
+      }
+
+      // Clear current tables
+      await this.clearAllTables();
+
+      // Load each table from the state
+      for (const [tableName, tableData] of Object.entries(state.tables)) {
+        await this.loadJSONData(tableData.data, tableName);
+      }
+
+      this.showStatus(`State "${state.name}" loaded successfully`, "success");
+
+      // Update execute button state after restoration
+      setTimeout(() => {
+        this.enableExecuteButton();
+      }, 50);
+
+      // Save as current session (unless it's already the session restore)
+      if (state.name !== "__last_session__") {
+        setTimeout(() => {
+          this.saveCurrentSession();
+        }, 100);
+      }
+    }
+
+    private async clearAllTables(): Promise<void> {
+      if (!this.connection) return;
+
+      for (const tableName of this.loadedTables) {
+        try {
+          await this.connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+        } catch (error) {
+          console.warn(`Failed to drop table ${tableName}:`, error);
+        }
+      }
+
+      this.loadedTables.clear();
+      this.tablesData.clear();
+
+      // Clear session when all data is cleared
+      this.clearCurrentSession();
+    }
+
+    private async saveState(stateName: string): Promise<void> {
+      if (!stateName.trim()) {
+        this.showStatus("Please enter a state name", "error");
+        return;
+      }
+
+      if (this.loadedTables.size === 0) {
+        this.showStatus("No data to save", "error");
+        return;
+      }
+
+      try {
+        const state = await this.serializeCurrentState();
+        state.name = stateName;
+
+        // Save state data
+        localStorage.setItem(
+          `json-sql-analyzer-state-${stateName}`,
+          JSON.stringify(state),
+        );
+
+        // Update states list
+        this.updateStatesList(stateName);
+        this.updateSavedStatesDropdown();
+
+        this.showStatus(`State "${stateName}" saved successfully`, "success");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showStatus(`Failed to save state: ${message}`, "error");
+      }
+    }
+
+    private async loadState(stateName: string): Promise<void> {
+      if (!stateName) return;
+
+      try {
+        const stateData = localStorage.getItem(
+          `json-sql-analyzer-state-${stateName}`,
+        );
+        if (!stateData) {
+          this.showStatus(`State "${stateName}" not found`, "error");
+          return;
+        }
+
+        const state: DatabaseState = JSON.parse(stateData);
+        await this.deserializeState(state);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.showStatus(`Failed to load state: ${message}`, "error");
+      }
+    }
+
+    private deleteState(stateName: string): void {
+      if (!stateName) return;
+
+      if (confirm(`Are you sure you want to delete state "${stateName}"?`)) {
+        localStorage.removeItem(`json-sql-analyzer-state-${stateName}`);
+        this.removeFromStatesList(stateName);
+        this.updateSavedStatesDropdown();
+        this.showStatus(`State "${stateName}" deleted`, "success");
+      }
+    }
+
+    private updateStatesList(stateName: string): void {
+      const statesList = this.getStatesList();
+      const existingIndex = statesList.findIndex((s) => s.name === stateName);
+
+      const stateInfo = { name: stateName, timestamp: Date.now() };
+
+      if (existingIndex >= 0) {
+        statesList[existingIndex] = stateInfo;
+      } else {
+        statesList.push(stateInfo);
+      }
+
+      localStorage.setItem(
+        "json-sql-analyzer-states",
+        JSON.stringify(statesList),
+      );
+    }
+
+    private removeFromStatesList(stateName: string): void {
+      const statesList = this.getStatesList();
+      const filteredList = statesList.filter((s) => s.name !== stateName);
+      localStorage.setItem(
+        "json-sql-analyzer-states",
+        JSON.stringify(filteredList),
+      );
+    }
+
+    private getStatesList(): Array<{ name: string; timestamp: number }> {
+      try {
+        return JSON.parse(
+          localStorage.getItem("json-sql-analyzer-states") || "[]",
+        );
+      } catch {
+        return [];
+      }
+    }
+
+    private updateSavedStatesDropdown(): void {
+      const dropdown = document.getElementById(
+        "saved-states",
+      ) as HTMLSelectElement;
+      const loadBtn = document.getElementById(
+        "load-state-btn",
+      ) as HTMLButtonElement;
+      const deleteBtn = document.getElementById(
+        "delete-state-btn",
+      ) as HTMLButtonElement;
+
+      if (!dropdown) return;
+
+      const states = this.getStatesList();
+      dropdown.innerHTML = "";
+
+      if (states.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No saved states";
+        dropdown.appendChild(option);
+        loadBtn.disabled = true;
+        deleteBtn.disabled = true;
+        return;
+      }
+
+      // Add empty option
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = "Select a state...";
+      dropdown.appendChild(emptyOption);
+
+      // Add states
+      states.sort((a, b) => b.timestamp - a.timestamp);
+      states.forEach((state) => {
+        const option = document.createElement("option");
+        option.value = state.name;
+        option.textContent = `${state.name} (${new Date(state.timestamp).toLocaleString()})`;
+        dropdown.appendChild(option);
+      });
+
+      // Update button states
+      loadBtn.disabled = !dropdown.value;
+      deleteBtn.disabled = !dropdown.value;
+    }
+
+    // Session Management for Browser Refresh
+    private async saveCurrentSession(): Promise<void> {
+      if (this.loadedTables.size === 0) return;
+
+      try {
+        const state = await this.serializeCurrentState();
+        state.name = "__last_session__";
+
+        localStorage.setItem(
+          "json-sql-analyzer-last-session",
+          JSON.stringify(state),
+        );
+      } catch (error) {
+        console.warn("Failed to save current session:", error);
+      }
+    }
+
+    private async tryRestoreLastSession(): Promise<void> {
+      if (!this.isInitialized) {
+        // Retry after a delay if not initialized yet
+        setTimeout(() => {
+          this.tryRestoreLastSession();
+        }, 500);
+        return;
+      }
+
+      try {
+        const sessionData = localStorage.getItem(
+          "json-sql-analyzer-last-session",
+        );
+        if (!sessionData) return;
+
+        const state: DatabaseState = JSON.parse(sessionData);
+
+        // Check if there's any data to restore
+        if (Object.keys(state.tables).length === 0) return;
+
+        await this.deserializeState(state);
+        this.showStatus("Previous session restored", "info");
+      } catch (error) {
+        console.warn("Failed to restore last session:", error);
+        // Clear corrupted session data
+        localStorage.removeItem("json-sql-analyzer-last-session");
+      }
+    }
+
+    private clearCurrentSession(): void {
+      localStorage.removeItem("json-sql-analyzer-last-session");
+    }
+  }
+
+  // Close history dropdown when clicking outside
+  document.addEventListener("click", (e) => {
+    const historyBtn = document.getElementById("history-btn");
+    const historyDropdown = document.getElementById("history-dropdown");
+
+    if (historyBtn && historyDropdown && e.target instanceof Node) {
+      if (
+        !historyBtn.contains(e.target) &&
+        !historyDropdown.contains(e.target)
+      ) {
+        historyDropdown.style.display = "none";
+      }
+    }
+  });
+
+  // Initialize the application
+  const analyzer = new JSONSQLAnalyzer();
+  (window as any).jsonSqlAnalyzer = analyzer;
+</script>

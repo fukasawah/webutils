@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@astrojs/netlify": "^6.4.1",
+    "@duckdb/duckdb-wasm": "^1.29.1-dev132.0",
     "@noble/hashes": "^1.8.0",
     "astro": "^5.11.0",
     "hash-wasm": "^4.12.0",
